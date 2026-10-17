@@ -29,17 +29,17 @@ Both secrets are required by the app env schema, including in development. Void 
 
 ## Web UI
 
-The Vue interface uses Void file-based pages and client navigation, with no UI framework or additional runtime dependencies. All account and collection data is loaded through the same-origin JSON API with the session cookie. The shared layout checks setup and session state before showing a screen; JavaScript is required. API authorization remains the security boundary.
+The Vue interface uses Void file-based pages and client navigation, with no UI framework. Plain scoped CSS on a small token set in `style.css` (zinc neutrals, one green accent, light/dark); the only UI dependencies are the self-hosted Geist and Geist Mono fonts (`@fontsource-variable/*`). Icons are inline SVGs in `components/Icon.vue`. All account and collection data is loaded through the same-origin JSON API with the session cookie. The shared layout checks setup and session state before showing a screen; JavaScript is required. API authorization remains the security boundary.
 
 - `/setup`: first-run admin creation and automatic sign-in. Other screens redirect here until setup is complete.
 - `/login` and `/register?code=…`: password sign-in and invite registration, respectively. Sign-out is in the header.
 - `/`: add links with an optional list, browse metadata, search/filter by `q`, `listId`, and `tag` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. Desktop lists/tags become select filters on mobile.
-- `/b/:id`: edit title/description, read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
+- `/b/:id`: edit title/description inline (Save appears when changed), read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
 - `/lists`: create, rename, and delete lists while keeping their bookmarks.
 - `/settings`: provider/model/reasoning effort, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.
-- `/admin/invites`: admin-only invitation creation with optional expiry, one-time link copying, paginated history, and revocation.
+- `/admin/invites`: admin-only invitation creation with an expiry of 1, 7 or 30 days or none, one-time link copying, paginated history, and revocation.
 
-The interface follows system light/dark appearance, uses native labeled controls and visible keyboard focus, and shows loading, empty, and API error states. UI helper tests are in `lib/ui.test.ts`.
+The interface follows system light/dark appearance, uses native labeled controls and visible keyboard focus, and shows skeleton loading, empty, and inline API error states. Confirmations ("Saved", "Link copied") use one global toast (`composables/toast.ts`); setting `notice` from `useTask()` shows it. UI helper tests are in `lib/ui.test.ts`.
 
 ## Cloudflare and AI
 

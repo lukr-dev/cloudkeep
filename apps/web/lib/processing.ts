@@ -88,7 +88,7 @@ export async function processBookmark(job: ProcessMessage) {
         error.message,
       )
         ? error.message
-        : "Processing failed; check the URL and AI settings, then reprocess";
+        : "Couldn’t process this page. Check the link and your AI settings, then retry.";
     await db
       .update(bookmarks)
       .set({ status: "failed", error: message, updatedAt: Date.now() })

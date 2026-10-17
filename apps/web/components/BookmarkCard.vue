@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Link } from "@void/vue";
+import Icon from "./Icon.vue";
 import type { BookmarkItem, BookmarkDetail } from "../lib/api.ts";
 import { filterUrl, type Filters } from "../lib/filters.ts";
 const props = defineProps<{
@@ -18,47 +19,67 @@ const domain = computed(() => {
     return props.bookmark.url;
   }
 });
-const image = computed(() =>
-  !imageFailed.value && props.bookmark.imageUrl
-    ? props.bookmark.imageUrl
-    : !faviconFailed.value
-      ? props.bookmark.faviconUrl
-      : null,
-);
-function failed() {
-  if (!imageFailed.value && props.bookmark.imageUrl) imageFailed.value = true;
-  else faviconFailed.value = true;
-}
+const working = computed(() => ["pending", "processing"].includes(props.bookmark.status));
+const age = computed(() => {
+  const seconds = (props.bookmark.createdAt - Date.now()) / 1000;
+  const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" });
+  for (const [unit, size] of [
+    ["year", 31_536_000],
+    ["month", 2_592_000],
+    ["week", 604_800],
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+  ] as const)
+    if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit);
+  return "just now";
+});
 </script>
 <template>
-  <article class="bookmark">
-    <Link :href="`/b/${bookmark.id}`" class="thumbnail" tabindex="-1" aria-hidden="true">
+  <article class="bookmark" :class="{ working }">
+    <div class="thumb">
       <img
-        v-if="image"
-        :src="image"
+        v-if="bookmark.imageUrl && !imageFailed"
+        :src="bookmark.imageUrl"
         alt=""
         loading="lazy"
         referrerpolicy="no-referrer"
-        :class="{ favicon: image !== bookmark.imageUrl }"
-        @error="failed"
+        @error="imageFailed = true"
       />
-      <span v-else class="fallback">{{ domain.charAt(0).toUpperCase() }}</span>
-    </Link>
-    <div class="content">
-      <p class="muted small site">
-        {{ bookmark.siteName || domain }}
-        <span
-          v-if="bookmark.status === 'pending' || bookmark.status === 'processing'"
-          role="status"
-          class="processing"
-          >· {{ bookmark.status === "pending" ? "Queued" : "Processing" }}</span
-        >
-      </p>
-      <h2>
-        <Link :href="`/b/${bookmark.id}`">{{ bookmark.title || bookmark.url }}</Link>
+      <span v-else-if="working" class="skeleton fill"></span>
+      <span v-else class="letter">{{ domain.charAt(0).toUpperCase() }}</span>
+    </div>
+    <div class="body">
+      <div class="source">
+        <img
+          v-if="bookmark.faviconUrl && !faviconFailed"
+          :src="bookmark.faviconUrl"
+          alt=""
+          class="favicon"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          @error="faviconFailed = true"
+        />
+        <span class="break">{{ bookmark.siteName || domain }}</span>
+        <span aria-hidden="true">·</span>
+        <time :datetime="new Date(bookmark.createdAt).toISOString()">{{ age }}</time>
+      </div>
+      <h2 class="title">
+        <Link :href="`/b/${bookmark.id}`" class="stretched">{{
+          bookmark.title || bookmark.url
+        }}</Link>
       </h2>
-      <p v-if="bookmark.description" class="description muted">{{ bookmark.description }}</p>
-      <div v-if="bookmark.tags.length" class="row tags">
+      <p v-if="bookmark.description" class="description">{{ bookmark.description }}</p>
+      <p v-if="working" class="status" role="status">
+        <span class="dot pulse"></span>Fetching details
+      </p>
+      <div v-else-if="bookmark.status === 'failed'" class="failed">
+        <span>{{ bookmark.error || "Couldn’t fetch this page." }}</span>
+        <button class="small" :disabled="busy" @click="$emit('retry', bookmark.id)">
+          <Icon name="refresh" :size="13" />Retry
+        </button>
+      </div>
+      <div v-if="bookmark.tags.length" class="tags">
         <Link
           v-for="tag in bookmark.tags"
           :key="tag.id"
@@ -67,107 +88,169 @@ function failed() {
           >{{ tag.name }}</Link
         >
       </div>
-      <div v-if="bookmark.status === 'failed'" class="failure small">
-        <span>{{ bookmark.error || "Processing failed." }}</span>
-        <button class="text-button" :disabled="busy" @click="$emit('retry', bookmark.id)">
-          Retry
-        </button>
-      </div>
     </div>
     <a
       :href="bookmark.url"
       target="_blank"
       rel="noopener noreferrer"
-      class="open small"
+      class="open"
       :aria-label="`Open ${bookmark.title || domain} in a new tab`"
-      >Open ↗</a
-    >
+      ><Icon name="external" :size="15"
+    /></a>
   </article>
 </template>
 <style scoped>
 .bookmark {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 1.1rem;
-  padding: 1.3rem 0;
-  border-bottom: 1px solid var(--line);
+  gap: 1rem;
+  padding: 0.85rem 0.75rem;
+  border-radius: var(--radius-lg);
+  transition: background-color 0.15s var(--ease);
+  animation: fade-in 0.35s var(--ease) both;
 }
-.thumbnail {
-  width: 96px;
-  height: 76px;
+.bookmark:hover {
+  background: var(--subtle);
+}
+.thumb {
+  width: 6.5rem;
+  aspect-ratio: 1.6;
   flex-shrink: 0;
-  background: var(--tint);
-  border-radius: 5px;
+  border-radius: var(--radius);
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
+  background: var(--subtle);
+  box-shadow: inset 0 0 0 1px var(--line);
+  display: grid;
+  place-items: center;
 }
-.thumbnail img {
+.thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.thumbnail img.favicon {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+.thumb .fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
 }
-.fallback {
-  color: var(--accent);
-  font-size: 1.5rem;
-  opacity: 0.6;
+.letter {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--faint);
 }
-.content {
+.body {
   flex: 1;
   min-width: 0;
 }
-h2 {
-  margin: 0.15rem 0 0.35rem;
-  font-size: 1.05rem;
+.source {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.title {
+  margin-top: 0.2rem;
+  font-size: 0.975rem;
+  font-weight: 550;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-h2 a {
-  color: var(--text);
-  text-decoration: none;
+.stretched::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
 }
-h2 a:hover {
-  color: var(--accent);
+.stretched:focus-visible {
+  outline: none;
 }
-.site {
-  margin: 0;
+.stretched:focus-visible::after {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .description {
+  margin-top: 0.2rem;
+  font-size: 0.875rem;
+  color: var(--muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin: 0 0 0.6rem;
-  font-size: 0.9rem;
 }
-.tags {
-  gap: 0.4rem;
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
-.processing {
-  color: var(--accent);
-}
-.failure {
-  margin-top: 0.6rem;
+.failed {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.45rem;
+  font-size: 0.84rem;
   color: var(--danger);
 }
-.open {
-  white-space: nowrap;
-  text-decoration: none;
+.bookmark:hover .chip {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
-@media (max-width: 650px) {
-  .thumbnail {
-    width: 56px;
-    height: 56px;
+.tags {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+}
+.open {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity 0.15s var(--ease),
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+.bookmark:hover .open,
+.open:focus-visible {
+  opacity: 1;
+}
+.open:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+@media (hover: none) {
+  .open {
+    opacity: 1;
   }
+}
+@media (max-width: 520px) {
   .bookmark {
     gap: 0.75rem;
+    padding: 0.75rem 0.5rem;
+  }
+  .thumb {
+    width: 4.5rem;
   }
   .open {
     display: none;

@@ -3,6 +3,8 @@ import { onMounted, provide, ref, watch } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { api, message, type User } from "../lib/api.ts";
 import { sessionKey } from "../composables/session.ts";
+import { toast } from "../composables/toast.ts";
+import Icon from "../components/Icon.vue";
 import "../style.css";
 const router = useRouter();
 const user = ref<User | null>(null);
@@ -75,28 +77,71 @@ async function signOut() {
 <template>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="header">
-    <Link href="/" class="brand">CloudKeep<span class="brand-dot">.</span></Link>
-    <nav v-if="user" aria-label="Main navigation">
-      <Link href="/" :aria-current="router.path === '/' ? 'page' : undefined">Bookmarks</Link>
-      <Link href="/lists" :aria-current="router.path === '/lists' ? 'page' : undefined">Lists</Link>
-      <Link href="/settings" :aria-current="router.path === '/settings' ? 'page' : undefined"
-        >Settings</Link
+    <div class="shell">
+      <Link href="/" class="brand" aria-label="CloudKeep home"
+        ><span class="brand-mark"><Icon name="mark" :size="13" /></span>CloudKeep</Link
       >
-      <Link
-        v-if="user.role === 'admin'"
-        href="/admin/invites"
-        :aria-current="router.path === '/admin/invites' ? 'page' : undefined"
-        >Invites</Link
-      >
-      <button class="text-button" :disabled="signingOut" @click="signOut">Sign out</button>
-    </nav>
-    <span v-else class="muted small">Your links. Your space.</span>
+      <nav v-if="user" class="nav" aria-label="Main">
+        <Link href="/" :aria-current="router.path === '/' ? 'page' : undefined">Bookmarks</Link>
+        <Link href="/lists" :aria-current="router.path === '/lists' ? 'page' : undefined"
+          >Lists</Link
+        >
+        <Link href="/settings" :aria-current="router.path === '/settings' ? 'page' : undefined"
+          >Settings</Link
+        >
+        <Link
+          v-if="user.role === 'admin'"
+          href="/admin/invites"
+          :aria-current="router.path === '/admin/invites' ? 'page' : undefined"
+          >Invites</Link
+        >
+      </nav>
+      <button v-if="user" class="ghost small sign-out" :disabled="signingOut" @click="signOut">
+        Sign out
+      </button>
+    </div>
   </header>
-  <main id="main" class="main" tabindex="-1">
+  <main id="main" class="main shell" tabindex="-1">
     <div v-if="error" role="alert" class="alert">
-      {{ error }} <button @click="check">Try again</button>
+      <span>{{ error }}</span
+      ><button @click="check">Try again</button>
     </div>
     <slot v-if="ready" />
-    <p v-else-if="!error" role="status" class="muted">Opening your space…</p>
+    <p v-else-if="!error" role="status" class="sr-only">Loading</p>
   </main>
+  <Transition name="toast">
+    <div v-if="toast" :key="toast.id" class="toast" role="status" aria-live="polite">
+      <Icon name="check" :size="14" />{{ toast.text }}
+    </div>
+  </Transition>
 </template>
+<style>
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-size: 0.86rem;
+  font-weight: 500;
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.25);
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.25s var(--ease);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+</style>

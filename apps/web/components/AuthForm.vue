@@ -10,17 +10,21 @@ const email = ref("");
 const password = ref("");
 const code = computed(() => router.query.get("code") ?? "");
 const { busy, error, run } = useTask();
-const heading = computed(
+const copy = computed(
   () =>
     ({
-      setup: "A home for your links.",
-      login: "Welcome back.",
-      register: "Make yourself at home.",
+      setup: {
+        heading: "Set up CloudKeep",
+        lead: "Create the admin account. Everyone else joins with an invite link.",
+        action: "Create account",
+      },
+      login: { heading: "Sign in", lead: "Welcome back to CloudKeep.", action: "Sign in" },
+      register: {
+        heading: "Create your account",
+        lead: "You’ve been invited to CloudKeep.",
+        action: "Create account",
+      },
     })[props.mode],
-);
-const action = computed(
-  () =>
-    ({ setup: "Create admin account", login: "Sign in", register: "Create account" })[props.mode],
 );
 function submit() {
   return run(async () => {
@@ -47,29 +51,20 @@ function submit() {
 }
 </script>
 <template>
-  <section class="auth">
-    <div class="page-heading">
-      <p class="muted small">{{ mode === "setup" ? "FIRST-RUN SETUP" : "CLOUDKEEP" }}</p>
-      <h1>{{ heading }}</h1>
-      <p class="muted">
-        {{
-          mode === "setup"
-            ? "Create the first account to start saving. You’ll be the admin."
-            : mode === "register"
-              ? "Your invitation is a place to start collecting."
-              : "Sign in to your personal collection."
-        }}
-      </p>
+  <section class="auth fade-in">
+    <div class="head">
+      <h1>{{ copy.heading }}</h1>
+      <p>{{ copy.lead }}</p>
     </div>
-    <p v-if="mode === 'register' && !code" class="alert" role="alert">
-      An invite is required. Open the complete link shared by your admin.
-    </p>
-    <form v-else class="panel stack" @submit.prevent="submit">
-      <div v-if="mode !== 'login'">
+    <div v-if="mode === 'register' && !code" class="alert" role="alert">
+      <span>This page needs an invite link. Ask your admin for one.</span>
+    </div>
+    <form v-else class="stack" @submit.prevent="submit">
+      <div v-if="mode !== 'login'" class="field">
         <label for="name">Name</label
         ><input id="name" v-model="name" autocomplete="name" required maxlength="100" />
       </div>
-      <div>
+      <div class="field">
         <label for="email">Email</label
         ><input
           id="email"
@@ -80,7 +75,7 @@ function submit() {
           maxlength="254"
         />
       </div>
-      <div>
+      <div class="field">
         <label for="password">Password</label
         ><input
           id="password"
@@ -91,18 +86,45 @@ function submit() {
           :minlength="mode === 'login' ? undefined : 12"
           maxlength="128"
           :aria-describedby="mode !== 'login' ? 'password-hint' : undefined"
-        /><small v-if="mode !== 'login'" id="password-hint" class="muted"
-          >At least 12 characters.</small
+        /><span v-if="mode !== 'login'" id="password-hint" class="hint"
+          >At least 12 characters.</span
         >
       </div>
-      <p v-if="error" class="alert" role="alert">{{ error }}</p>
-      <button class="primary" :disabled="busy">{{ busy ? "Please wait…" : action }}</button>
+      <div v-if="error" class="alert" role="alert">
+        <span>{{ error }}</span>
+      </div>
+      <button class="primary submit" :disabled="busy">
+        {{ busy ? "One moment…" : copy.action }}
+      </button>
     </form>
-    <p v-if="mode === 'register' || mode === 'setup'" class="small muted" style="margin-top: 1rem">
-      Already created an account? <Link href="/login">Sign in</Link>
-    </p>
-    <p v-else class="small muted" style="margin-top: 1rem">
-      New here? Ask your admin for an invite link.
+    <p class="foot">
+      <template v-if="mode === 'login'">No account? Ask your admin for an invite link.</template>
+      <template v-else-if="mode === 'register'"
+        >Already have an account? <Link href="/login" class="link">Sign in</Link></template
+      >
     </p>
   </section>
 </template>
+<style scoped>
+.auth {
+  max-width: 22rem;
+  margin: 10vh auto 0;
+}
+.head {
+  margin-bottom: 1.75rem;
+}
+.head p {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+.submit {
+  width: 100%;
+  height: 2.5rem;
+  margin-top: 0.25rem;
+}
+.foot {
+  margin-top: 1.5rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+</style>

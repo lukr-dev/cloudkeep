@@ -20,6 +20,24 @@ const keys = reactive({ openai: "", openrouter: "" });
 const externalProviders = ["openrouter", "openai"] as const;
 const promptKinds = ["tagging", "summary"] as const;
 const { busy, error, notice, run } = useTask();
+const providers = [
+  { value: "", label: "Off" },
+  { value: "workers-ai", label: "Workers AI" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "openai", label: "OpenAI" },
+] as const;
+const providerNames = { openai: "OpenAI", openrouter: "OpenRouter" } as const;
+const promptLabels = {
+  tagging: { title: "Tagging", hint: "Runs on every new bookmark to pick tags." },
+  summary: { title: "Summary", hint: "Runs when automatic summaries are on." },
+} as const;
+function choose(value: Provider | "") {
+  if (provider.value === value) return;
+  provider.value = value;
+  model.value = "";
+  reasoningEffort.value =
+    value && settings.value ? settings.value.defaultReasoningEffort[value] : null;
+}
 function populate(value: Settings) {
   settings.value = value;
   provider.value = value.provider ?? "";
@@ -57,7 +75,7 @@ function save() {
         },
       }),
     );
-    notice.value = "Settings saved.";
+    notice.value = "Settings saved";
   });
 }
 function clearKey(name: "openai" | "openrouter") {
@@ -68,13 +86,13 @@ function clearKey(name: "openai" | "openrouter") {
     });
     if (settings.value) settings.value.keys = value.keys;
     keys[name] = "";
-    notice.value = "Key cleared.";
+    notice.value = "Key removed";
   });
 }
 function test() {
   return run(async () => {
     await api("/api/settings/ai/test", { method: "POST", body: {} });
-    notice.value = "Connection successful.";
+    notice.value = "Connection works";
   });
 }
 function savePrompt(kind: "tagging" | "summary", reset = false) {
@@ -84,166 +102,292 @@ function savePrompt(kind: "tagging" | "summary", reset = false) {
       method: reset ? "DELETE" : "PUT",
       ...(reset ? {} : { body: { template: prompts.value[kind].template } }),
     });
-    notice.value = reset ? "Default prompt restored." : "Prompt saved.";
+    notice.value = reset ? "Default prompt restored" : "Prompt saved";
   });
 }
 </script>
 <template>
-  <section class="narrow">
-    <div class="page-heading">
+  <div class="settings">
+    <div class="page-head">
       <h1>Settings</h1>
-      <p class="muted">A little help organizing, on your terms.</p>
     </div>
-    <p v-if="error" class="alert" role="alert">
-      {{ error }} <button v-if="!settings || !prompts" @click="run(load)">Try again</button>
-    </p>
-    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <p v-if="!settings || !prompts" role="status" class="muted">Loading settings…</p>
+    <div v-if="error" class="alert" role="alert">
+      <span>{{ error }}</span
+      ><button v-if="!settings || !prompts" @click="run(load)">Try again</button>
+    </div>
+    <div v-if="!settings || !prompts" class="loading" aria-hidden="true">
+      <div v-for="n in 3" :key="n" class="skeleton"></div>
+    </div>
     <template v-if="settings && prompts">
-      <form class="panel stack" @submit.prevent="save">
-        <h2>AI provider</h2>
-        <div>
-          <label for="provider">Provider</label
-          ><select
-            id="provider"
-            v-model="provider"
-            @change="
-              model = '';
-              reasoningEffort = provider ? settings.defaultReasoningEffort[provider] : null;
-            "
-          >
-            <option value="">None</option>
-            <option value="workers-ai">Workers AI</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="openai">OpenAI</option>
-          </select>
+      <form class="group fade-in" @submit.prevent="save">
+        <div class="intro">
+          <h2>AI</h2>
+          <p>Tags and summarizes new bookmarks. Use Cloudflare Workers AI, or your own key.</p>
         </div>
-        <div v-if="provider" class="model-settings">
-          <div>
-            <label for="model">Model</label
-            ><input
-              id="model"
-              v-model="model"
-              :placeholder="settings.defaultModels[provider]"
-              maxlength="200"
-            /><small class="muted"
-              >Leave blank to use {{ settings.defaultModels[provider] }}.</small
+        <div class="controls stack">
+          <div class="field">
+            <span id="provider-label" class="label">Provider</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="provider-label">
+              <button
+                v-for="option in providers"
+                :key="option.value"
+                type="button"
+                role="radio"
+                :aria-checked="provider === option.value"
+                @click="choose(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+          <template v-if="provider">
+            <div class="pair">
+              <div class="field">
+                <label for="model">Model</label
+                ><input
+                  id="model"
+                  v-model="model"
+                  class="mono-input"
+                  :placeholder="settings.defaultModels[provider]"
+                  maxlength="200"
+                  spellcheck="false"
+                />
+              </div>
+              <div class="field">
+                <label for="reasoning-effort">Reasoning</label>
+                <select id="reasoning-effort" v-model="reasoningEffort">
+                  <option :value="null">Default</option>
+                  <option value="none">None</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </div>
+            <p class="hint">
+              Leave the model empty to use the default. Reasoning is only sent when set.
+            </p>
+            <p v-if="provider === 'workers-ai'" class="hint note">
+              Runs on your Cloudflare account. No key needed.
+            </p>
+            <div v-else class="field">
+              <div class="row label-row">
+                <label :for="`key-${provider}`">{{ providerNames[provider] }} API key</label
+                ><span v-if="settings.keys[provider].hasKey" class="saved"
+                  ><span class="dot"></span>Saved</span
+                >
+              </div>
+              <div class="row">
+                <input
+                  :id="`key-${provider}`"
+                  v-model="keys[provider]"
+                  class="grow mono-input"
+                  type="password"
+                  autocomplete="new-password"
+                  maxlength="4096"
+                  spellcheck="false"
+                  :placeholder="
+                    settings.keys[provider].hasKey ? '••••••••  Paste to replace' : 'Paste your key'
+                  "
+                /><button
+                  v-if="settings.keys[provider].hasKey"
+                  type="button"
+                  class="ghost"
+                  :disabled="busy"
+                  @click="clearKey(provider)"
+                >
+                  Remove
+                </button>
+              </div>
+              <p class="hint">Stored encrypted. Never shown again.</p>
+            </div>
+          </template>
+          <div class="toggles">
+            <label class="check"
+              ><input v-model="autoTag" type="checkbox" :disabled="!provider" />Tag new
+              bookmarks</label
+            ><label class="check"
+              ><input v-model="autoSummary" type="checkbox" :disabled="!provider" />Summarize new
+              bookmarks</label
             >
-          </div>
-          <div>
-            <label for="reasoning-effort">Reasoning effort</label>
-            <select id="reasoning-effort" v-model="reasoningEffort">
-              <option :value="null">Provider default</option>
-              <option value="none">None</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-            <small class="muted"
-              >Provider default: {{ settings.defaultReasoningEffort[provider] ?? "unspecified" }}.
-              Applies to the default model; explicit models omit effort unless selected.
-            </small>
-          </div>
-        </div>
-        <div v-for="name in externalProviders" :key="name">
-          <div class="row spread">
-            <label :for="`key-${name}`"
-              >{{ name === "openai" ? "OpenAI" : "OpenRouter" }} API key</label
-            ><span class="muted small">{{
-              settings.keys[name].hasKey ? "Key saved" : "No key saved"
-            }}</span>
           </div>
           <div class="row">
-            <input
-              :id="`key-${name}`"
-              v-model="keys[name]"
-              class="grow"
-              type="password"
-              autocomplete="new-password"
-              maxlength="4096"
-              :placeholder="
-                settings.keys[name].hasKey ? 'Enter a new key to replace' : 'Enter API key'
-              "
-            /><button
-              v-if="settings.keys[name].hasKey"
-              type="button"
-              :disabled="busy"
-              @click="clearKey(name)"
-            >
-              Clear
+            <button class="primary" :disabled="busy">Save</button
+            ><button v-if="provider" type="button" class="ghost" :disabled="busy" @click="test">
+              Test connection
             </button>
           </div>
         </div>
-        <label class="check"
-          ><input v-model="autoTag" type="checkbox" />Automatically tag new bookmarks</label
-        ><label class="check"
-          ><input v-model="autoSummary" type="checkbox" />Automatically summarize new
-          bookmarks</label
-        >
-        <div class="row">
-          <button class="primary" :disabled="busy">Save settings</button
-          ><button type="button" :disabled="busy" @click="test">Test connection</button>
-        </div>
-        <small class="muted">Connection tests use your saved settings. Save changes first.</small>
       </form>
-      <section class="prompts">
-        <h2>Prompts</h2>
-        <p class="muted small">
-          Available variables:
-          <code v-for="variable in prompts.variables" :key="variable"
-            ><span v-text="'{{' + variable + '}}'"></span>
-          </code>
-        </p>
-        <form
-          v-for="kind in promptKinds"
-          :key="kind"
-          class="panel stack prompt"
-          @submit.prevent="savePrompt(kind)"
-        >
-          <div class="row spread">
-            <label :for="`prompt-${kind}`">{{
-              kind === "tagging" ? "Tagging prompt" : "Summary prompt"
-            }}</label
-            ><span class="muted small">{{
-              prompts[kind].isDefault ? "Default" : "Customized"
-            }}</span>
+      <section class="group fade-in">
+        <div class="intro">
+          <h2>Prompts</h2>
+          <p>Edit what the AI is asked. Variables are filled in for each bookmark.</p>
+          <div class="variables">
+            <code
+              v-for="variable in prompts.variables"
+              :key="variable"
+              v-text="'{{' + variable + '}}'"
+            />
           </div>
-          <textarea
-            :id="`prompt-${kind}`"
-            v-model="prompts[kind].template"
-            rows="9"
-            required
-            maxlength="12000"
-          />
-          <div class="row">
-            <button :disabled="busy">Save prompt</button
-            ><button type="button" :disabled="busy" @click="savePrompt(kind, true)">
-              Reset to default
-            </button>
-          </div>
-        </form>
+        </div>
+        <div class="controls stack">
+          <form
+            v-for="kind in promptKinds"
+            :key="kind"
+            class="field"
+            @submit.prevent="savePrompt(kind)"
+          >
+            <div class="row label-row">
+              <label :for="`prompt-${kind}`">{{ promptLabels[kind].title }}</label
+              ><span class="hint">{{ prompts[kind].isDefault ? "Default" : "Edited" }}</span>
+            </div>
+            <textarea
+              :id="`prompt-${kind}`"
+              v-model="prompts[kind].template"
+              class="prompt"
+              rows="10"
+              required
+              maxlength="12000"
+              spellcheck="false"
+            />
+            <div class="row prompt-actions">
+              <span class="hint grow">{{ promptLabels[kind].hint }}</span
+              ><button
+                v-if="!prompts[kind].isDefault"
+                type="button"
+                class="ghost small"
+                :disabled="busy"
+                @click="savePrompt(kind, true)"
+              >
+                Reset</button
+              ><button class="small" :disabled="busy">Save prompt</button>
+            </div>
+          </form>
+        </div>
       </section>
     </template>
-  </section>
+  </div>
 </template>
 <style scoped>
-.model-settings {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+.settings {
+  max-width: 880px;
 }
-.prompts {
-  margin-top: 2.5rem;
+.group {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 3rem;
+  padding: 0.5rem 0 2.5rem;
+}
+.group + .group {
+  padding-top: 2.5rem;
+  border-top: 1px solid var(--line);
+}
+.intro p {
+  margin-top: 0.35rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.variables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.9rem;
+}
+.variables code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--subtle);
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 3px;
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--subtle);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.segmented button {
+  height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.segmented button:hover {
+  color: var(--text);
+  background: transparent;
+}
+.segmented button[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 0 0 1px var(--line);
+}
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10rem;
+  gap: 0.75rem;
+}
+.pair + .hint {
+  margin-top: -0.75rem;
+}
+.note {
+  color: var(--muted);
+}
+.mono-input {
+  font-family: var(--mono);
+  font-size: 0.84rem;
+}
+.label-row {
+  justify-content: space-between;
+}
+.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+.toggles {
+  display: grid;
+  gap: 0.6rem;
+  padding: 1rem 0;
+  border-block: 1px solid var(--line);
+}
+.toggles .check:has(input:disabled) {
+  color: var(--faint);
+  cursor: default;
 }
 .prompt {
-  margin-top: 1rem;
-}
-code {
-  white-space: nowrap;
+  font-family: var(--mono);
   font-size: 0.8rem;
+  line-height: 1.6;
+  background: var(--surface);
 }
-textarea {
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+.prompt-actions {
+  margin-top: 0.15rem;
+}
+.loading {
+  display: grid;
+  gap: 1rem;
+}
+.loading .skeleton {
+  height: 3rem;
+}
+@media (max-width: 760px) {
+  .group {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+  .segmented {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .pair {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

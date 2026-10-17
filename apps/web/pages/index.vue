@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { Link, useRouter } from "@void/vue";
 import BookmarkCard from "../components/BookmarkCard.vue";
+import Icon from "../components/Icon.vue";
 import {
   allItems,
   api,
@@ -31,6 +32,8 @@ let request = 0;
 let disposed = false;
 let controller: AbortController | undefined;
 const hasFilters = computed(() => !!(filters.q || filters.listId || filters.tag));
+const activeList = computed(() => lists.value.find((list) => list.id === filters.listId));
+const usedTags = computed(() => tags.value.filter((tag) => tag.count));
 async function refreshCatalog() {
   const result = await Promise.all([allItems<List>("/api/lists"), allItems<Tag>("/api/tags")]);
   if (!disposed) [lists.value, tags.value] = result;
@@ -92,6 +95,10 @@ const schedule = usePolling(
 function apply() {
   void router.visit(filterUrl(filters), { preserveScroll: true });
 }
+function clearSearch() {
+  filters.q = "";
+  apply();
+}
 async function add() {
   duplicateId.value = "";
   // Snapshot the input: the user may paste the next link while this one is saving.
@@ -104,7 +111,7 @@ async function add() {
     });
     if (url.value === submitted) url.value = "";
     if (result.alreadyExists) duplicateId.value = result.bookmark.id;
-    else notice.value = "Link saved. Metadata is on its way.";
+    else notice.value = "Saved. Fetching details…";
     saved = true;
   });
   // Refresh outside the busy window so the next link can be submitted right away.
@@ -141,260 +148,395 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <div class="page-heading">
-    <p class="muted small">YOUR COLLECTION</p>
-    <h1>Good things, kept.</h1>
-    <p class="muted">A little space for everything worth coming back to.</p>
+  <div class="page-head">
+    <h1>Bookmarks</h1>
   </div>
-  <form class="add-bar" @submit.prevent="add">
-    <div class="grow">
-      <label for="new-url" class="small">Save a bookmark</label
-      ><input
-        id="new-url"
-        v-model="url"
-        type="url"
-        placeholder="Paste a link…"
-        required
-        maxlength="8000"
-      />
-    </div>
-    <div class="add-list">
-      <label for="new-list" class="small">Add to list</label
-      ><select id="new-list" v-model="newList">
-        <option value="">No list</option>
-        <option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option>
-      </select>
-    </div>
-    <button class="primary" :disabled="busy">{{ busy ? "Saving…" : "Add link" }}</button>
+  <form class="save" @submit.prevent="add">
+    <label for="new-url" class="sr-only">Link to save</label>
+    <Icon name="plus" class="save-icon" />
+    <input
+      id="new-url"
+      v-model="url"
+      type="url"
+      placeholder="Paste a link to save it"
+      required
+      maxlength="8000"
+      autocomplete="off"
+    />
+    <label for="new-list" class="sr-only">Add to list</label>
+    <select v-if="lists.length" id="new-list" v-model="newList" class="save-list">
+      <option value="">No list</option>
+      <option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option>
+    </select>
+    <button class="primary" :disabled="busy">{{ busy ? "Saving…" : "Save" }}</button>
   </form>
-  <p v-if="duplicateId" class="notice" role="status">
-    Already in your collection. <Link :href="`/b/${duplicateId}`">View the saved bookmark</Link>.
+  <p v-if="duplicateId" class="save-note fade-in" role="status">
+    Already saved. Moved it to the top.
+    <Link :href="`/b/${duplicateId}`" class="link">Open</Link>
   </p>
-  <p v-if="error" class="alert" role="alert">{{ error }}</p>
-  <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+  <p v-if="error" class="alert save-note" role="alert">{{ error }}</p>
   <div class="collection">
-    <aside class="sidebar" aria-label="Collection filters">
-      <Link href="/" class="all" :aria-current="!hasFilters ? 'page' : undefined"
-        >All bookmarks</Link
+    <aside class="sidebar" aria-label="Filters">
+      <Link href="/" class="filter" :aria-current="!hasFilters ? 'page' : undefined"
+        ><span>All bookmarks</span></Link
       >
-      <div class="sidebar-heading row spread">
+      <div class="sidebar-head">
         <h2>Lists</h2>
-        <Link href="/lists" class="small">Manage</Link>
+        <Link href="/lists" class="sidebar-action" aria-label="Manage lists"
+          ><Icon name="plus" :size="14"
+        /></Link>
       </div>
-      <p v-if="!lists.length" class="muted small">Make a list to keep links together.</p>
+      <p v-if="!lists.length" class="sidebar-empty">No lists yet</p>
       <Link
         v-for="list in lists"
         :key="list.id"
         :href="filterUrl({ ...filters, listId: filters.listId === list.id ? '' : list.id })"
         :aria-current="filters.listId === list.id ? 'page' : undefined"
-        class="filter-item"
-        ><span>{{ list.name }}</span
-        ><span class="muted small">{{ list.count }}</span></Link
+        class="filter"
+        ><span class="break">{{ list.name }}</span
+        ><span class="count tabular">{{ list.count }}</span></Link
       >
-      <h2 class="sidebar-heading">Tags</h2>
-      <p v-if="!tags.some((tag) => tag.count)" class="muted small">Tags will appear here.</p>
+      <div class="sidebar-head"><h2>Tags</h2></div>
+      <p v-if="!usedTags.length" class="sidebar-empty">Tags appear as links are tagged</p>
       <Link
-        v-for="tag in tags.filter((tag) => tag.count)"
+        v-for="tag in usedTags"
         :key="tag.id"
         :href="filterUrl({ ...filters, tag: filters.tag === tag.name ? '' : tag.name })"
         :aria-current="filters.tag === tag.name ? 'page' : undefined"
-        class="filter-item"
-        ><span>{{ tag.name }}</span
-        ><span class="muted small">{{ tag.count }}</span></Link
+        class="filter"
+        ><span class="break">{{ tag.name }}</span
+        ><span class="count tabular">{{ tag.count }}</span></Link
       >
     </aside>
     <section class="results" aria-label="Bookmarks" :aria-busy="loading">
-      <form class="filters" @submit.prevent="apply">
-        <div class="grow">
-          <label for="search" class="small">Search</label
-          ><input
+      <form class="toolbar" role="search" @submit.prevent="apply">
+        <div class="search">
+          <label for="search" class="sr-only">Search bookmarks</label>
+          <Icon name="search" class="search-icon" />
+          <input
             id="search"
             v-model="filters.q"
             type="search"
-            placeholder="Search your bookmarks"
+            placeholder="Search"
             maxlength="200"
           />
+          <button
+            v-if="filters.q"
+            type="button"
+            class="ghost icon search-clear"
+            aria-label="Clear search"
+            @click="clearSearch"
+          >
+            <Icon name="x" :size="14" />
+          </button>
         </div>
-        <div class="mobile-filter">
-          <label for="filter-list" class="small">List</label
+        <div class="mobile-filters">
+          <label for="filter-list" class="sr-only">List</label
           ><select id="filter-list" v-model="filters.listId" @change="apply">
             <option value="">All lists</option>
-            <option v-for="list in lists" :key="list.id" :value="list.id">
-              {{ list.name }} ({{ list.count }})
-            </option>
+            <option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option>
           </select>
-        </div>
-        <div class="mobile-filter">
-          <label for="filter-tag" class="small">Tag</label
+          <label for="filter-tag" class="sr-only">Tag</label
           ><select id="filter-tag" v-model="filters.tag" @change="apply">
             <option value="">All tags</option>
-            <option v-for="tag in tags.filter((tag) => tag.count)" :key="tag.id" :value="tag.name">
-              {{ tag.name }} ({{ tag.count }})
-            </option>
+            <option v-for="tag in usedTags" :key="tag.id" :value="tag.name">{{ tag.name }}</option>
           </select>
         </div>
-        <button>Search</button>
+        <button type="submit" class="sr-only">Search</button>
       </form>
-      <div class="row spread result-heading">
-        <span class="muted small">{{ total }} {{ total === 1 ? "bookmark" : "bookmarks" }}</span
-        ><Link v-if="hasFilters" href="/" class="small">Clear filters</Link>
+      <div class="meta">
+        <span class="muted small tabular"
+          >{{ total }} {{ total === 1 ? "bookmark" : "bookmarks" }}</span
+        >
+        <Link v-if="activeList" :href="filterUrl({ ...filters, listId: '' })" class="chip"
+          >{{ activeList.name }}<Icon name="x" :size="12"
+        /></Link>
+        <Link v-if="filters.tag" :href="filterUrl({ ...filters, tag: '' })" class="chip"
+          >{{ filters.tag }}<Icon name="x" :size="12"
+        /></Link>
       </div>
-      <div v-if="hasFilters" class="row active-filters">
-        <span v-if="filters.listId" class="chip"
-          >List:
-          {{ lists.find((list) => list.id === filters.listId)?.name || filters.listId }}</span
-        ><span v-if="filters.tag" class="chip">Tag: {{ filters.tag }}</span>
+      <div v-if="loadError" class="alert" role="alert">
+        <span>{{ loadError }}</span
+        ><button @click="load()">Try again</button>
       </div>
-      <p v-if="loadError" class="alert" role="alert">
-        {{ loadError }} <button @click="load()">Try again</button>
-      </p>
-      <p v-if="loading && !bookmarks.length" class="muted" role="status">Loading bookmarks…</p>
-      <div v-else-if="!bookmarks.length && !loadError" class="empty">
-        <h2>
-          {{ hasFilters ? "Nothing matches just yet." : "Your collection starts with a link." }}
-        </h2>
-        <p class="muted">
+      <div v-if="loading && !bookmarks.length" class="skeletons" aria-hidden="true">
+        <div v-for="n in 4" :key="n" class="skeleton-row">
+          <div class="skeleton thumb"></div>
+          <div class="grow">
+            <div class="skeleton line short"></div>
+            <div class="skeleton line"></div>
+            <div class="skeleton line mid"></div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="!bookmarks.length && !loadError" class="empty fade-in">
+        <h2>{{ hasFilters ? "No matches" : "No bookmarks yet" }}</h2>
+        <p>
           {{
             hasFilters
-              ? "Try another search or clear your filters."
-              : "Paste a URL above. We’ll take care of the details."
+              ? "Try a different search, or clear the filters."
+              : "Paste a link above to save your first one."
           }}
         </p>
       </div>
-      <BookmarkCard
-        v-for="bookmark in bookmarks"
-        :key="bookmark.id"
-        :bookmark="bookmark"
-        :filters="filters"
-        :busy="busy"
-        @retry="retry"
-      />
+      <div v-else class="list">
+        <BookmarkCard
+          v-for="bookmark in bookmarks"
+          :key="bookmark.id"
+          :bookmark="bookmark"
+          :filters="filters"
+          :busy="busy"
+          @retry="retry"
+        />
+      </div>
       <button
         v-if="bookmarks.length < total"
         class="load-more"
         :disabled="loading"
         @click="load(true)"
       >
-        {{ loading ? "Loading…" : "Load more" }}
+        {{ loading ? "Loading…" : "Show more" }}
       </button>
     </section>
   </div>
 </template>
 <style scoped>
-.add-bar {
+.save {
+  position: relative;
   display: flex;
-  gap: 0.75rem;
-  align-items: flex-end;
-  padding: 1.2rem;
-  border: 1px solid var(--line);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem;
   background: var(--surface);
-  border-radius: 8px;
-  margin-bottom: 2.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  transition:
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
 }
-.grow {
+.save:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.save-icon {
+  margin-left: 0.5rem;
+  color: var(--faint);
+  flex-shrink: 0;
+}
+.save input {
   flex: 1;
-  min-width: 0;
+  border: 0;
+  height: 2.25rem;
+  padding: 0 0.25rem;
+  background: transparent;
+  font-size: 0.95rem;
 }
-.add-list {
-  width: 180px;
+.save input:focus {
+  box-shadow: none;
 }
-.add-bar button {
-  padding: 0.65rem 1rem;
+.save-list {
+  width: auto;
+  max-width: 11rem;
+  border-color: transparent;
+  background-color: var(--subtle);
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.save-list:focus {
+  box-shadow: none;
+  border-color: var(--line-strong);
+}
+.save-note {
+  margin-top: 0.75rem;
+  font-size: 0.88rem;
+  color: var(--muted);
 }
 .collection {
   display: grid;
-  grid-template-columns: 185px minmax(0, 1fr);
-  gap: 2.75rem;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 3rem;
+  margin-top: 2.5rem;
 }
 .sidebar {
-  padding-top: 0.4rem;
+  position: sticky;
+  top: 5.5rem;
+  align-self: start;
+  display: grid;
+  gap: 1px;
 }
-.sidebar h2 {
-  font-size: 0.85rem;
-  margin: 0;
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1.5rem 0 0.35rem;
+  padding: 0 0.6rem;
 }
-.sidebar-heading {
-  margin: 1.6rem 0 0.65rem;
+.sidebar-head h2 {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--faint);
 }
-.filter-item {
+.sidebar-action {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 5px;
+  color: var(--faint);
+}
+.sidebar-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.sidebar-empty {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.84rem;
+  color: var(--faint);
+}
+.filter {
   display: flex;
   justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.4rem 0.55rem;
-  margin-left: -0.55rem;
+  gap: 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
   color: var(--muted);
-  text-decoration: none;
-  border-radius: 4px;
-  overflow-wrap: anywhere;
-}
-.filter-item[aria-current],
-.filter-item:hover {
-  background: var(--tint);
-  color: var(--accent);
-}
-.all {
-  color: var(--text);
-  text-decoration: none;
   font-size: 0.9rem;
+  transition:
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease);
 }
-.filters {
+.filter:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.filter[aria-current] {
+  background: var(--subtle);
+  color: var(--text);
+  font-weight: 500;
+}
+.count {
+  color: var(--faint);
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+.toolbar {
   display: flex;
-  align-items: flex-end;
-  gap: 0.65rem;
+  gap: 0.5rem;
 }
-.filters button {
-  padding: 0.65rem 0.9rem;
+.search {
+  position: relative;
+  flex: 1;
 }
-.mobile-filter {
+.search-icon {
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--faint);
+  pointer-events: none;
+}
+.search input {
+  padding-left: 2.1rem;
+  padding-right: 2.25rem;
+  background: transparent;
+  border-color: var(--line);
+}
+.search input::-webkit-search-cancel-button {
   display: none;
 }
-.result-heading {
-  margin: 1.2rem 0 0.3rem;
+.search-clear {
+  position: absolute;
+  right: 0.15rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2rem;
+  height: 2rem;
 }
-.active-filters {
-  margin: 0.75rem 0;
+.mobile-filters {
+  display: none;
+  gap: 0.5rem;
+}
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+  margin: 1.25rem 0 0.75rem;
+}
+.meta .chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.list {
+  display: grid;
+  gap: 2px;
+  margin: 0 -0.75rem;
+}
+.skeletons {
+  display: grid;
+  gap: 2px;
+}
+.skeleton-row {
+  display: flex;
+  gap: 1rem;
+  padding: 0.9rem 0;
+}
+.skeleton.thumb {
+  width: 6.5rem;
+  height: 4.125rem;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+}
+.skeleton.line {
+  height: 0.7rem;
+  margin: 0.35rem 0 0.6rem;
+}
+.skeleton.short {
+  width: 30%;
+}
+.skeleton.mid {
+  width: 60%;
 }
 .load-more {
   display: flex;
-  margin: 1.5rem auto;
+  margin: 1.5rem auto 0;
 }
-@media (max-width: 750px) {
+@media (max-width: 820px) {
   .collection {
     grid-template-columns: 1fr;
+    gap: 0;
+    margin-top: 1.75rem;
   }
   .sidebar {
     display: none;
   }
-  .mobile-filter {
-    display: block;
-    width: calc(50% - 0.4rem);
-  }
-  .filters {
+  .toolbar {
     flex-wrap: wrap;
   }
-  .filters .grow {
-    flex-basis: 70%;
-  }
-  .filters button {
-    order: 0;
-  }
-  .mobile-filter {
-    order: 1;
-  }
-  .add-list {
-    width: 140px;
-  }
-}
-@media (max-width: 500px) {
-  .add-bar {
-    flex-wrap: wrap;
-    padding: 1rem;
-  }
-  .add-bar .grow {
+  .search {
     flex-basis: 100%;
   }
-  .add-list {
+  .mobile-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 520px) {
+  .save {
+    flex-wrap: wrap;
+  }
+  .save input {
+    flex-basis: calc(100% - 2.5rem);
+  }
+  .save-list {
     flex: 1;
+    max-width: none;
+  }
+  .list {
+    margin: 0 -0.5rem;
   }
 }
 </style>

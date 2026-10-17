@@ -3,9 +3,11 @@ import { onMounted, ref } from "vue";
 import { api, type Invite, type Page } from "../../lib/api.ts";
 import { useSession } from "../../composables/session.ts";
 import { useTask } from "../../composables/task.ts";
+import Icon from "../../components/Icon.vue";
 const user = useSession();
 const invites = ref<Invite[]>([]);
-const expiry = ref("");
+const expiryDays = ref("7");
+const copied = ref(false);
 const inviteLink = ref("");
 const more = ref(false);
 const loaded = ref(false);
@@ -25,15 +27,17 @@ function create() {
   return run(async () => {
     const result = await api<{ invite: Invite; code: string }>("/api/admin/invites", {
       method: "POST",
-      body: { expiresAt: expiry.value ? new Date(expiry.value).getTime() : null },
+      body: {
+        expiresAt: expiryDays.value ? Date.now() + Number(expiryDays.value) * 86_400_000 : null,
+      },
     });
     inviteLink.value = `${window.location.origin}/register?code=${encodeURIComponent(result.code)}`;
-    expiry.value = "";
+    copied.value = false;
     await load();
   });
 }
 function revoke(id: string) {
-  if (window.confirm("Revoke this invitation?"))
+  if (window.confirm("Revoke this invite? The link will stop working."))
     return run(async () => {
       await api(`/api/admin/invites/${id}`, { method: "DELETE" });
       await load();
@@ -43,9 +47,10 @@ function copy() {
   return run(async () => {
     try {
       await navigator.clipboard.writeText(inviteLink.value);
-      notice.value = "Invite link copied.";
+      copied.value = true;
+      notice.value = "Link copied";
     } catch {
-      throw new Error("Copy unavailable. Select the link and copy it manually.");
+      throw new Error("Couldn’t copy. Select the link and copy it manually.");
     }
   });
 }
@@ -60,28 +65,29 @@ function status(invite: Invite) {
 }
 </script>
 <template>
-  <section v-if="user?.role === 'admin'" class="narrow">
-    <div class="page-heading">
-      <p class="muted small">ADMIN</p>
-      <h1>Invite someone in.</h1>
-      <p class="muted">Each invitation can be used once.</p>
-    </div>
-    <form class="panel stack" @submit.prevent="create">
+  <div v-if="user?.role === 'admin'" class="invites">
+    <div class="page-head">
       <div>
-        <label for="expiry">Expires at <span class="muted small">(optional)</span></label
-        ><input id="expiry" v-model="expiry" type="datetime-local" /><small class="muted"
-          >Your local time. Leave blank for no expiry.</small
-        >
+        <h1>Invites</h1>
+        <p>Each link lets one person create an account.</p>
       </div>
-      <div><button class="primary" :disabled="busy">Create invite</button></div>
+    </div>
+    <form class="create" @submit.prevent="create">
+      <label for="expiry" class="sr-only">Link expires</label>
+      <select id="expiry" v-model="expiryDays">
+        <option value="1">Expires in 1 day</option>
+        <option value="7">Expires in 7 days</option>
+        <option value="30">Expires in 30 days</option>
+        <option value="">Never expires</option>
+      </select>
+      <button class="primary" :disabled="busy">Create invite link</button>
     </form>
-    <p v-if="error" class="alert" role="alert">
-      {{ error }} <button v-if="!loaded" @click="run(() => load())">Try again</button>
-    </p>
-    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <div v-if="inviteLink" class="panel new-invite">
-      <label for="invite-link">Your invite link</label>
-      <p class="muted small">Copy it now. This link is only shown here once.</p>
+    <div v-if="error" class="alert" role="alert">
+      <span>{{ error }}</span
+      ><button v-if="!loaded" @click="run(() => load())">Try again</button>
+    </div>
+    <div v-if="inviteLink" class="new-link fade-in">
+      <label for="invite-link">New invite link</label>
       <div class="row">
         <input
           id="invite-link"
@@ -89,40 +95,114 @@ function status(invite: Invite) {
           :value="inviteLink"
           readonly
           @focus="($event.target as HTMLInputElement).select()"
-        /><button :disabled="busy" @click="copy">Copy</button>
+        /><button :disabled="busy" @click="copy">
+          <Icon v-if="copied" name="check" :size="14" />{{ copied ? "Copied" : "Copy" }}
+        </button>
       </div>
+      <p class="hint">Copy it now. It won’t be shown again.</p>
     </div>
-    <h2 class="history">Invitations</h2>
-    <p v-if="!loaded && !error" class="muted" role="status">Loading invitations…</p>
-    <p v-else-if="loaded && !invites.length" class="empty muted">No invitations yet.</p>
-    <article v-for="invite in invites" :key="invite.id" class="invite row">
-      <div class="grow">
-        <strong>{{ status(invite) }}</strong>
-        <p class="muted small">
-          Created {{ new Date(invite.createdAt).toLocaleString() }}<br />{{
+    <h2 class="history">Sent</h2>
+    <div v-if="!loaded && !error" class="rows" aria-hidden="true">
+      <div v-for="n in 2" :key="n" class="skeleton placeholder"></div>
+    </div>
+    <p v-else-if="loaded && !invites.length" class="none">No invites yet.</p>
+    <ul v-else class="rows">
+      <li v-for="invite in invites" :key="invite.id" class="invite">
+        <span class="status" :data-status="status(invite).toLowerCase()">{{ status(invite) }}</span>
+        <span class="when grow">
+          Created {{ new Date(invite.createdAt).toLocaleDateString() }}
+          <span aria-hidden="true">·</span>
+          {{
             invite.expiresAt
-              ? `Expires ${new Date(invite.expiresAt).toLocaleString()}`
+              ? `${status(invite) === "Expired" ? "Expired" : "Expires"} ${new Date(invite.expiresAt).toLocaleDateString()}`
               : "No expiry"
           }}
-        </p>
-      </div>
-      <button v-if="status(invite) === 'Active'" :disabled="busy" @click="revoke(invite.id)">
-        Revoke
-      </button>
-    </article>
-    <button v-if="more" :disabled="busy" @click="run(() => load(true))">Load more</button>
-  </section>
+        </span>
+        <button
+          v-if="status(invite) === 'Active'"
+          class="ghost small danger"
+          :disabled="busy"
+          @click="revoke(invite.id)"
+        >
+          Revoke
+        </button>
+      </li>
+    </ul>
+    <button v-if="more" class="more" :disabled="busy" @click="run(() => load(true))">
+      Show more
+    </button>
+  </div>
 </template>
 <style scoped>
-.new-invite,
+.invites {
+  max-width: 640px;
+}
+.create {
+  display: flex;
+  gap: 0.5rem;
+}
+.create select {
+  width: auto;
+  flex: 1;
+}
+.new-link {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+}
+.new-link input {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
 .history {
-  margin-top: 2rem;
+  margin: 2.5rem 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--faint);
+}
+.none {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.placeholder {
+  height: 2.75rem;
+  margin-bottom: 2px;
 }
 .invite {
-  padding: 1rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: 3rem;
   border-bottom: 1px solid var(--line);
+  font-size: 0.88rem;
 }
-.invite p {
-  margin: 0.25rem 0 0;
+.status {
+  width: 4.5rem;
+  font-weight: 500;
+}
+.status[data-status="active"] {
+  color: var(--accent);
+}
+.status:not([data-status="active"]) {
+  color: var(--faint);
+}
+.when {
+  color: var(--muted);
+}
+.more {
+  margin-top: 1rem;
+}
+@media (max-width: 520px) {
+  .create {
+    flex-direction: column;
+  }
 }
 </style>

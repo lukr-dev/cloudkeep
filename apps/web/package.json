@@ -11,6 +11,8 @@
     "db:migrate": "void db migrate"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "catalog:",
+    "@fontsource-variable/geist-mono": "catalog:",
     "@void/vue": "catalog:",
     "better-auth": "catalog:",
     "entities": "catalog:",
