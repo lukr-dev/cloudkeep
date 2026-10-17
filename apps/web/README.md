@@ -1,6 +1,6 @@
 # CloudKeep backend
 
-A Vue + Void 1.1.11 app on Cloudflare Workers, using Hono routes, D1/Drizzle, Better Auth email/password sessions, and a bookmark-processing queue. `pages/index.vue` is intentionally a placeholder; every product operation uses JSON under `/api`.
+A Vue + Void 1.1.11 app on Cloudflare Workers, using Hono routes, D1/Drizzle, Better Auth email/password sessions, and a bookmark-processing queue. Every product operation uses JSON under `/api`.
 
 ## Install and run
 
@@ -26,6 +26,20 @@ BETTER_AUTH_SECRET=<another independent random secret, at least 32 characters>
 Run `openssl rand -base64 32` independently for each value. Keep the values in a password manager; losing `ENCRYPTION_KEY` makes stored provider keys unreadable. Do not replace it without re-encrypting existing keys. The encryption format is versioned; no key-rotation migration is implemented yet. AES-256-GCM uses a fresh random 12-byte IV and authenticates the user ID and provider as additional data, preventing ciphertext from being swapped between accounts/providers. Only the presence of a key is returned by the API.
 
 Both secrets are required by the app env schema, including in development. Void normally supplies a development auth fallback and can create a production auth secret, but explicitly requiring the secret also makes it available in the generated production-preview environment. Neither secret is exposed to client code. Check local values with `(cd apps/web && vp exec void env check)`.
+
+## Web UI
+
+The Vue interface uses Void file-based pages and client navigation, with no UI framework or additional runtime dependencies. All account and collection data is loaded through the same-origin JSON API with the session cookie. The shared layout checks setup and session state before showing a screen; JavaScript is required. API authorization remains the security boundary.
+
+- `/setup`: first-run admin creation and automatic sign-in. Other screens redirect here until setup is complete.
+- `/login` and `/register?code=…`: password sign-in and invite registration, respectively. Sign-out is in the header.
+- `/`: add links with an optional list, browse metadata, search/filter by `q`, `listId`, and `tag` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. Desktop lists/tags become select filters on mobile.
+- `/b/:id`: edit title/description, read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
+- `/lists`: create, rename, and delete lists while keeping their bookmarks.
+- `/settings`: provider/model, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.
+- `/admin/invites`: admin-only invitation creation with optional expiry, one-time link copying, paginated history, and revocation.
+
+The interface follows system light/dark appearance, uses native labeled controls and visible keyboard focus, and shows loading, empty, and API error states. UI helper tests are in `lib/ui.test.ts`.
 
 ## Cloudflare and AI
 
@@ -195,6 +209,6 @@ Overrides are 1–12,000 characters. Supported variables are `{{url}}`, `{{title
 
 ## Remaining work
 
-Build the Vue UI/mobile client against this contract. Measure deployed CPU and account quotas; verify real Workers AI and external-provider inference with owner credentials. Add key rotation and operational recovery/queue monitoring if needed. Add email delivery/verification/password-reset UX only when required; this phase has no email service. No admin role editor, import/export, archived content, full Readability scoring, or per-list prompts are implemented.
+Build a mobile client against this contract. Measure deployed CPU and account quotas; verify real Workers AI and external-provider inference with owner credentials. Add key rotation and operational recovery/queue monitoring if needed. Add email delivery/verification/password-reset UX only when required; this phase has no email service. No admin role editor, import/export, archived content, full Readability scoring, or per-list prompts are implemented.
 
 The current Void docs largely match the brief. Differences: init inside an existing workspace configures the app without a Vue picker (the documented `@void/vue` adapter was added manually); `--no-git` is rejected for workspace subpackages; Void already uses native scrypt; Queues now work on Free; unlinked local AI uses a Void proxy rather than the direct remote binding; env files other than `.env` are unsupported; and Better Auth tables/migrations are generated automatically and must not be duplicated in the app schema. `defineConfig` from `vite-plus` works with Void, so no lint-rule exception is needed.
