@@ -53,11 +53,19 @@ vp exec void connect --platform cloudflare
 printf %s "$ENCRYPTION_KEY" | vp exec void secret put ENCRYPTION_KEY
 printf %s "$SETUP_TOKEN" | vp exec void secret put SETUP_TOKEN
 # Void creates BETTER_AUTH_SECRET automatically on deploy.
-vp exec void domain add cloudkeep.toast.net
+vp exec void domain add cloudkeep.toastnet.work
 vp exec void deploy --platform cloudflare
 ```
 
 The API token needs account permissions Workers Scripts: Edit, D1: Edit, Queues: Edit, Workers AI: Read and Account Settings: Read, plus zone permissions on the custom domain's zone: Zone: Read, DNS: Edit and Workers Routes: Edit. Commit `void.config.ts` and `void.lock.json` after the first deploy. Then open the site and complete setup with the `SETUP_TOKEN`.
+
+Production runs at https://cloudkeep.toastnet.work (Worker `cloudkeep`, D1 `cloudkeep-db`, queue `bookmarks`). Lessons from the first deploy:
+
+- Void forces Cloudflare's keyring mode for auth checks, which on Linux needs `secret-tool` (`apt install libsecret-tools`) even when `CLOUDFLARE_API_TOKEN` is set.
+- Account-owned API tokens work. `void cloudflare status` may still report "not signed in" until `secret-tool` is installed.
+- Required secrets must exist before the first deploy. `void secret put` creates a draft Worker for that, which needs Workers Scripts: **Edit** (Read returns 403).
+- Load the credentials file as data (`grep`/`cut`), never `source` it: values with shell metacharacters get executed and echoed.
+- Binding inference doesn't scan `lib/`, so `void.config.ts` enables the Workers AI binding explicitly (`inference.bindings.ai`).
 
 Void infers D1, auth, queues and AI from the code. It provisions them and applies checked-in migrations on deploy. Review the plan/account and current Free-tier quotas before deploying. An unlinked local app uses Void's AI proxy; a direct Cloudflare project uses a remote Workers AI binding and needs a Cloudflare login/token even in development. There is no local Workers AI simulator. Void uses its own Cloudflare login (`void cloudflare login`); `wrangler login` does not configure it.
 
