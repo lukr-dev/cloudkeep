@@ -1,0 +1,26 @@
+{
+  "name": "mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "rspeedy dev --host 0.0.0.0",
+    "build": "rspeedy build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "vue": "catalog:",
+    "vue-lynx": "0.5.1"
+  },
+  "devDependencies": {
+    "@lynx-js/rspeedy": "0.13.3",
+    "@lynx-js/types": "4.3.0",
+    "@rsbuild/core": "1.7.2",
+    "@rsbuild/plugin-vue": "1.2.9",
+    "@types/node": "catalog:",
+    "typescript": "5.9.3",
+    "vite-plus": "catalog:",
+    "vue-tsc": "3.3.13"
+  }
+}

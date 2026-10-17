@@ -5,6 +5,7 @@ packages:
 
 allowBuilds:
   better-sqlite3: false
+  core-js: false
   esbuild: true
   workerd: true
 
