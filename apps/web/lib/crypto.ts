@@ -38,9 +38,11 @@ export async function digest(value: string) {
 // Must match Void's default Better Auth hasher (native node:crypto scrypt, `salt:key` hex),
 // because registration writes hashes that Better Auth's login then verifies.
 const SCRYPT_OPTIONS = { N: 16384, r: 16, p: 1, maxmem: 64 * 1024 * 1024 };
+// Unicode normalization form applied before hashing, so equivalent inputs hash identically.
+const UNICODE_FORM = "NFKC";
 function scryptKey(password: string, salt: string) {
   return new Promise<Buffer>((resolve, reject) =>
-    scrypt(password.normalize("NFKC"), salt, 64, SCRYPT_OPTIONS, (error, key) =>
+    scrypt(password.normalize(UNICODE_FORM), salt, 64, SCRYPT_OPTIONS, (error, key) =>
       error ? reject(error) : resolve(key),
     ),
   );
