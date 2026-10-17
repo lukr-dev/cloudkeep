@@ -22,12 +22,23 @@ class CloudKeepModule(context: Context) : LynxModule(context) {
                 val args = JSONObject(payload)
                 val store = app.store
                 val result: Any = when (action) {
-                    "getState" -> store.snapshot()
+                    "getState" -> {
+                        ShareTiming.mark("state_read_start")
+                        store.snapshot().also { ShareTiming.mark("state_read_ready") }
+                    }
                     "setCredentials" -> { store.credentials(args.getString("server"), args.getString("token")); true }
                     "clearCredentials" -> { store.clearCredentials(); true }
                     "setShareSettings" -> { store.shareSettings(args.getString("shareMode"), args.getString("defaultList")); true }
-                    "getPendingSharedUrl" -> store.pendingUrl
-                    "clearPendingSharedUrl" -> { store.pending(""); true }
+                    "cacheLists" -> { store.cacheLists(args.getString("server"), args.getString("token"), args.getJSONArray("lists")); true }
+                    "getPendingSharedUrl" -> app.shares.pendingUrl
+                    "clearPendingSharedUrl" -> { app.shares.pending(""); true }
+                    "frontendReady" -> { main.post { MainActivity.current.get()?.frontendReady() }; true }
+                    "markTiming" -> {
+                        val phase = args.getString("phase")
+                        require(phase in listOf("js_state_ready", "js_picker_committed", "lists_loaded"))
+                        ShareTiming.mark(phase)
+                        true
+                    }
                     "request" -> {
                         val state = store.snapshot()
                         ApiClient().request(state.getString("server"), state.getString("token"), args.getString("path"), args.optString("method", "GET"), if (args.has("body")) args.getString("body") else null)
