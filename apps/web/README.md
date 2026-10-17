@@ -45,18 +45,21 @@ The interface follows system light/dark appearance, uses native labeled controls
 
 The repository has no linked Cloudflare account or deployment target. Metadata extraction, auth, D1, queues, and external providers work locally without Cloudflare login. The initial AI provider is `null`, so new accounts do not call AI until configured; `autoTag` defaults to `true` and `autoSummary` to `false`.
 
-For direct Cloudflare development/deployment, the owner can run these commands from `apps/web`:
+For direct Cloudflare deployment, run these from `apps/web` with `CLOUDFLARE_API_TOKEN` (and `CLOUDFLARE_ACCOUNT_ID` if the token reaches several accounts) in the environment, or after `vp exec void cloudflare login`:
 
 ```sh
 vp exec void connect --platform cloudflare
-# Follow Void's Cloudflare authentication flow if needed.
-vp exec void secret put ENCRYPTION_KEY
-# Void creates BETTER_AUTH_SECRET automatically on deploy; optionally set your own:
-vp exec void secret put BETTER_AUTH_SECRET
+# Production secrets: read from stdin so they never land in shell history.
+printf %s "$ENCRYPTION_KEY" | vp exec void secret put ENCRYPTION_KEY
+printf %s "$SETUP_TOKEN" | vp exec void secret put SETUP_TOKEN
+# Void creates BETTER_AUTH_SECRET automatically on deploy.
+vp exec void domain add cloudkeep.toast.net
 vp exec void deploy --platform cloudflare
 ```
 
-No deployment or account login was performed during implementation. Void infers D1, auth, queues and AI from the code. It provisions them and applies checked-in migrations on deploy. Review the plan/account and current Free-tier quotas before deploying. An unlinked local app uses Void's AI proxy; a direct Cloudflare project uses a remote Workers AI binding and needs a Cloudflare login/token even in development. There is no local Workers AI simulator. Void uses its own Cloudflare login (`void cloudflare login`); `wrangler login` does not configure it.
+The API token needs account permissions Workers Scripts: Edit, D1: Edit, Queues: Edit, Workers AI: Read and Account Settings: Read, plus zone permissions on the custom domain's zone: Zone: Read, DNS: Edit and Workers Routes: Edit. Commit `void.config.ts` and `void.lock.json` after the first deploy. Then open the site and complete setup with the `SETUP_TOKEN`.
+
+Void infers D1, auth, queues and AI from the code. It provisions them and applies checked-in migrations on deploy. Review the plan/account and current Free-tier quotas before deploying. An unlinked local app uses Void's AI proxy; a direct Cloudflare project uses a remote Workers AI binding and needs a Cloudflare login/token even in development. There is no local Workers AI simulator. Void uses its own Cloudflare login (`void cloudflare login`); `wrangler login` does not configure it.
 
 External OpenAI/OpenRouter requests go directly to their documented chat-completions endpoints with the selected user's decrypted API key. Void's `ai.provider()` uses project-wide secrets/Gateway credentials, so it is deliberately not used for per-user keys. There is no OAuth or subscription authentication. Default models:
 
@@ -104,9 +107,9 @@ For a local production preview, build first with both values in `.env`. Void wri
 2. `POST /api/setup` creates the first account as `admin`. Sign in separately afterwards.
 3. Every later registration uses `POST /api/register` and an unused admin-created invite. It creates a `user` role.
 
-Setup inserts a permanent singleton claim and the profile, Better Auth user and credential account in one D1 transaction/batch. Competing setup requests cannot create two admins. Invite consumption and account creation are also one batch; an email conflict rolls back invite use. Setup remains closed even if all users are later removed. Public Better Auth `/api/auth/sign-up/email` is disabled in the server auth configuration. No client-supplied role is accepted. All admins can list/revoke all invites; ordinary users cannot access admin routes.
+When `SETUP_TOKEN` is set, `POST /api/setup` requires a matching `setupToken` (constant-time compare) and `GET /api/setup/status` reports `tokenRequired`, so a fresh public deployment cannot be claimed by whoever arrives first. Leave it unset for local development. Setup inserts a permanent singleton claim and the profile, Better Auth user and credential account in one D1 transaction/batch. Competing setup requests cannot create two admins. Invite consumption and account creation are also one batch; an email conflict rolls back invite use. Setup remains closed even if all users are later removed. Public Better Auth `/api/auth/sign-up/email` is disabled in the server auth configuration. No client-supplied role is accepted. All admins can list/revoke all invites; ordinary users cannot access admin routes.
 
-Better Auth handles sign-in/session/sign-out at `/api/auth/*`. It receives the same hash/verify functions as custom registration. Roles live in `profiles`, so editing Better Auth's user profile cannot grant admin rights. Better Auth's built-in sign-in rate limits remain enabled for deployed Cloudflare requests. The custom setup/register endpoints do not add a shared rate-limit store.
+Better Auth handles sign-in/session/sign-out at `/api/auth/*`. It uses Void's default scrypt hasher; `lib/crypto.ts` writes hashes in the same format for setup and invite registration. Roles live in `profiles`, so editing Better Auth's user profile cannot grant admin rights. Better Auth's built-in sign-in rate limits remain enabled for deployed Cloudflare requests. The custom setup/register endpoints do not add a shared rate-limit store.
 
 Browser clients use same-origin cookies. For a future mobile client:
 

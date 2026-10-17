@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { normalizeUrl } from "./url.ts";
 import { DEFAULT_PROMPTS, parseTags, renderPrompt } from "./prompts.ts";
-import { decrypt, encrypt, hashPassword, verifyPassword } from "./crypto.ts";
+import { decrypt, encrypt, hashPassword, safeEqual, verifyPassword } from "./crypto.ts";
 import {
   DEFAULT_MODELS,
   DEFAULT_REASONING_EFFORT,
@@ -170,4 +170,9 @@ it("reads Workers AI chat content before legacy responses and ignores reasoning"
     ).toThrow("AI returned empty content");
   expect(() => parseWorkersAiResponse({ response: "" })).toThrow("AI returned empty content");
   expect(() => parseWorkersAiResponse({ choices: [{ message: { content: 42 } }] })).toThrow();
+});
+it("compares setup tokens without leaking length", async () => {
+  expect(await safeEqual("setup-token-123", "setup-token-123")).toBe(true);
+  expect(await safeEqual("setup-token-123", "setup-token-124")).toBe(false);
+  expect(await safeEqual("short", "a much longer token value")).toBe(false);
 });

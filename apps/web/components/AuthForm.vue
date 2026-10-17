@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { api } from "../lib/api.ts";
 import { useTask } from "../composables/task.ts";
@@ -8,6 +8,17 @@ const router = useRouter();
 const name = ref("");
 const email = ref("");
 const password = ref("");
+const setupToken = ref("");
+const tokenRequired = ref(false);
+onMounted(async () => {
+  if (props.mode !== "setup") return;
+  try {
+    tokenRequired.value =
+      (await api<{ tokenRequired?: boolean }>("/api/setup/status")).tokenRequired ?? false;
+  } catch {
+    // The layout already reports status errors.
+  }
+});
 const code = computed(() => router.query.get("code") ?? "");
 const { busy, error, run } = useTask();
 const copy = computed(
@@ -37,6 +48,9 @@ function submit() {
           email: email.value,
           password: password.value,
           ...(props.mode === "register" ? { inviteCode: code.value } : {}),
+          ...(props.mode === "setup" && tokenRequired.value
+            ? { setupToken: setupToken.value }
+            : {}),
         },
       });
     }
@@ -60,6 +74,21 @@ function submit() {
       <span>This page needs an invite link. Ask your admin for one.</span>
     </div>
     <form v-else class="stack" @submit.prevent="submit">
+      <div v-if="mode === 'setup' && tokenRequired" class="field">
+        <label for="setup-token">Setup token</label
+        ><input
+          id="setup-token"
+          v-model="setupToken"
+          type="password"
+          autocomplete="off"
+          required
+          maxlength="200"
+          spellcheck="false"
+          aria-describedby="setup-token-hint"
+        /><span id="setup-token-hint" class="hint"
+          >Set as <code>SETUP_TOKEN</code> when this app was deployed.</span
+        >
+      </div>
       <div v-if="mode !== 'login'" class="field">
         <label for="name">Name</label
         ><input id="name" v-model="name" autocomplete="name" required maxlength="100" />

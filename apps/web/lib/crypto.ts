@@ -54,3 +54,7 @@ export async function verifyPassword({ hash, password }: { hash: string; passwor
   if (!salt || key?.length !== 128 || extra.length > 0) return false;
   return timingSafeEqual(await scryptKey(password, salt), Buffer.from(key, "hex"));
 }
+// Hash both sides first so the comparison is constant-time regardless of input length.
+export async function safeEqual(a: string, b: string) {
+  return timingSafeEqual(Buffer.from(await digest(a), "hex"), Buffer.from(await digest(b), "hex"));
+}
