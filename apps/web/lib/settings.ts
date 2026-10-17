@@ -1,16 +1,23 @@
 import { db, and, eq, isNull } from "void/db";
 import { ai } from "void/ai";
 import { env } from "void/env";
-import { z } from "zod";
 import { profiles, prompts } from "../db/schema.ts";
-import { DEFAULT_MODELS, externalCompletion } from "./providers.ts";
+import {
+  DEFAULT_MODELS,
+  DEFAULT_REASONING_EFFORT,
+  effectiveReasoningEffort,
+  externalCompletion,
+  workersAiInput,
+  parseWorkersAiResponse,
+} from "./providers.ts";
 import { decrypt } from "./crypto.ts";
 import { DEFAULT_PROMPTS, PROMPT_VARIABLES, type PromptKind } from "./prompts.ts";
 
 export function publicSettings(profile: typeof profiles.$inferSelect) {
   return {
     provider: profile.provider,
-    model: profile.model ?? (profile.provider ? DEFAULT_MODELS[profile.provider] : null),
+    model: profile.model,
+    reasoningEffort: profile.reasoningEffort,
     autoTag: profile.autoTag,
     autoSummary: profile.autoSummary,
     keys: {
@@ -18,6 +25,7 @@ export function publicSettings(profile: typeof profiles.$inferSelect) {
       openrouter: { hasKey: !!profile.openrouterKey },
     },
     defaultModels: DEFAULT_MODELS,
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
   };
 }
 export async function effectivePrompts(userId: string) {
@@ -43,15 +51,13 @@ export async function complete(
   const provider = profile.provider;
   if (!provider) throw new Error("Choose an AI provider in settings");
   const model = profile.model ?? DEFAULT_MODELS[provider];
+  const effort = effectiveReasoningEffort(profile);
   if (provider === "workers-ai") {
-    const response = await ai.run(model, {
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: maxTokens,
-    });
-    return z.object({ response: z.string().max(32_000) }).parse(response).response;
+    const response = await ai.run(model, workersAiInput(prompt, maxTokens, effort));
+    return parseWorkersAiResponse(response);
   }
   const encrypted = provider === "openai" ? profile.openaiKey : profile.openrouterKey;
   if (!encrypted) throw new Error("Set an API key for the selected provider");
   const key = await decrypt(encrypted, env.ENCRYPTION_KEY, `${profile.userId}:${provider}`);
-  return externalCompletion(provider, model, key, prompt, maxTokens);
+  return externalCompletion(provider, model, key, prompt, maxTokens, effort);
 }

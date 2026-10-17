@@ -34,14 +34,17 @@ export type Invite = {
   usedAt: number | null;
   revokedAt: number | null;
 };
+export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export type Provider = "workers-ai" | "openrouter" | "openai";
 export type Settings = {
   provider: Provider | null;
   model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   autoTag: boolean;
   autoSummary: boolean;
   keys: Record<"openai" | "openrouter", { hasKey: boolean }>;
   defaultModels: Record<Provider, string>;
+  defaultReasoningEffort: Record<Provider, ReasoningEffort | null>;
 };
 export type Prompt = { template: string; defaultTemplate: string; isDefault: boolean };
 export type Prompts = Record<"tagging" | "summary", Prompt> & { variables: string[] };

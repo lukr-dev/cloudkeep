@@ -5,8 +5,8 @@ import BookmarkCard from "../components/BookmarkCard.vue";
 import {
   allItems,
   api,
-  ApiError,
   message,
+  type Bookmark,
   type BookmarkItem,
   type List,
   type Page,
@@ -98,24 +98,13 @@ async function add() {
   const submitted = url.value;
   let saved = false;
   await run(async () => {
-    try {
-      await api("/api/bookmarks", {
-        method: "POST",
-        body: { url: submitted, listIds: newList.value ? [newList.value] : [] },
-      });
-    } catch (cause) {
-      if (
-        cause instanceof ApiError &&
-        cause.status === 409 &&
-        typeof cause.data.existingBookmarkId === "string"
-      ) {
-        duplicateId.value = cause.data.existingBookmarkId;
-        return;
-      }
-      throw cause;
-    }
+    const result = await api<{ bookmark: Bookmark; alreadyExists: boolean }>("/api/bookmarks", {
+      method: "POST",
+      body: { url: submitted, listIds: newList.value ? [newList.value] : [] },
+    });
     if (url.value === submitted) url.value = "";
-    notice.value = "Link saved. Metadata is on its way.";
+    if (result.alreadyExists) duplicateId.value = result.bookmark.id;
+    else notice.value = "Link saved. Metadata is on its way.";
     saved = true;
   });
   // Refresh outside the busy window so the next link can be submitted right away.

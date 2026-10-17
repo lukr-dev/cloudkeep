@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { normalizeUrl } from "./url.ts";
 import { DEFAULT_PROMPTS, parseTags, renderPrompt } from "./prompts.ts";
 import { decrypt, encrypt, hashPassword, verifyPassword } from "./crypto.ts";
-import { externalCompletion, providerRequest } from "./providers.ts";
+import {
+  DEFAULT_MODELS,
+  DEFAULT_REASONING_EFFORT,
+  effectiveReasoningEffort,
+  externalCompletion,
+  providerRequest,
+  workersAiInput,
+  parseWorkersAiResponse,
+} from "./providers.ts";
 
 it("normalizes URLs without merging meaningful paths or query values", () => {
   expect(normalizeUrl(" HTTPS://Example.COM:443/a?utm_source=x&utm_medium=y&b=2&a=1#part ")).toBe(
@@ -66,7 +74,7 @@ describe("external providers", () => {
         .fn<typeof fetch>()
         .mockResolvedValue(Response.json({ choices: [{ message: { content: "OK" } }] }));
       expect(
-        await externalCompletion(provider, "custom-model", "sk-test", "Hello", 8, fetcher),
+        await externalCompletion(provider, "custom-model", "sk-test", "Hello", 8, null, fetcher),
       ).toBe("OK");
       const request = providerRequest(provider, "custom-model", "sk-test", "Hello", 8);
       expect(request.url).toBe(
@@ -91,8 +99,75 @@ describe("external providers", () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response("secret key leaked here", { status: 401 }));
-    await expect(externalCompletion("openai", "m", "k", "p", 8, fetcher)).rejects.toThrow(
+    await expect(externalCompletion("openai", "m", "k", "p", 8, null, fetcher)).rejects.toThrow(
       "AI provider returned HTTP 401",
     );
   });
+});
+
+it("uses provider effort defaults only with an unset model", () => {
+  expect(DEFAULT_MODELS).toEqual({
+    openai: "gpt-5.6-luna",
+    openrouter: "deepseek/deepseek-v4.1-flash",
+    "workers-ai": "@cf/google/gemma-4-26b-a4b-it",
+  });
+  for (const provider of ["openai", "openrouter", "workers-ai"] as const) {
+    expect(effectiveReasoningEffort({ provider, model: null, reasoningEffort: null })).toBe(
+      DEFAULT_REASONING_EFFORT[provider],
+    );
+    expect(
+      effectiveReasoningEffort({ provider, model: "custom", reasoningEffort: null }),
+    ).toBeNull();
+    expect(effectiveReasoningEffort({ provider, model: "custom", reasoningEffort: "none" })).toBe(
+      "none",
+    );
+    expect(effectiveReasoningEffort({ provider, model: null, reasoningEffort: "high" })).toBe(
+      "high",
+    );
+  }
+  expect(
+    effectiveReasoningEffort({ provider: null, model: null, reasoningEffort: null }),
+  ).toBeNull();
+});
+it("sends effort using each provider's field, including explicit none", async () => {
+  for (const provider of ["openai", "openrouter"] as const) {
+    for (const effort of ["none", "low", "medium", "high"] as const) {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(Response.json({ choices: [{ message: { content: "OK" } }] }));
+      await externalCompletion(provider, "custom", "key", "prompt", 42, effort, fetcher);
+      expect(JSON.parse(fetcher.mock.calls[0]![1]!.body as string)).toEqual({
+        model: "custom",
+        messages: [{ role: "user", content: "prompt" }],
+        ...(provider === "openai"
+          ? { max_completion_tokens: 42, reasoning_effort: effort }
+          : { max_tokens: 42, reasoning: { effort } }),
+      });
+    }
+  }
+});
+it("uses current Workers AI input fields and omits unset effort", () => {
+  expect(workersAiInput("prompt", 42, null)).toEqual({
+    messages: [{ role: "user", content: "prompt" }],
+    max_completion_tokens: 42,
+  });
+  expect(workersAiInput("prompt", 42, "none")).toHaveProperty("reasoning_effort", "none");
+});
+it("reads Workers AI chat content before legacy responses and ignores reasoning", () => {
+  expect(
+    parseWorkersAiResponse({
+      choices: [{ message: { content: "Answer", reasoning_content: "Private reasoning" } }],
+      response: "Legacy answer",
+    }),
+  ).toBe("Answer");
+  expect(parseWorkersAiResponse({ response: "Legacy answer" })).toBe("Legacy answer");
+  expect(parseWorkersAiResponse({ choices: [], response: "Legacy answer" })).toBe("Legacy answer");
+  for (const content of ["", "   ", null, undefined])
+    expect(() =>
+      parseWorkersAiResponse({
+        choices: [{ message: { content, reasoning_content: "Reasoning is not an answer" } }],
+      }),
+    ).toThrow("AI returned empty content");
+  expect(() => parseWorkersAiResponse({ response: "" })).toThrow("AI returned empty content");
+  expect(() => parseWorkersAiResponse({ choices: [{ message: { content: 42 } }] })).toThrow();
 });

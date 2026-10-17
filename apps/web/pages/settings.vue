@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { api, type Settings, type Prompts, type Prompt, type Provider } from "../lib/api.ts";
+import {
+  api,
+  type Settings,
+  type Prompts,
+  type Prompt,
+  type Provider,
+  type ReasoningEffort,
+} from "../lib/api.ts";
 import { useTask } from "../composables/task.ts";
 const settings = ref<Settings | null>(null);
 const prompts = ref<Prompts | null>(null);
 const provider = ref<Provider | "">("");
 const model = ref("");
+const reasoningEffort = ref<ReasoningEffort | null>(null);
 const autoTag = ref(true);
 const autoSummary = ref(false);
 const keys = reactive({ openai: "", openrouter: "" });
@@ -16,6 +24,7 @@ function populate(value: Settings) {
   settings.value = value;
   provider.value = value.provider ?? "";
   model.value = value.model ?? "";
+  reasoningEffort.value = value.reasoningEffort;
   autoTag.value = value.autoTag;
   autoSummary.value = value.autoSummary;
   keys.openai = "";
@@ -41,6 +50,7 @@ function save() {
         body: {
           provider: provider.value || null,
           model: model.value.trim() || null,
+          reasoningEffort: reasoningEffort.value,
           autoTag: autoTag.value,
           autoSummary: autoSummary.value,
           keys: changedKeys,
@@ -94,21 +104,46 @@ function savePrompt(kind: "tagging" | "summary", reset = false) {
         <h2>AI provider</h2>
         <div>
           <label for="provider">Provider</label
-          ><select id="provider" v-model="provider" @change="model = ''">
+          ><select
+            id="provider"
+            v-model="provider"
+            @change="
+              model = '';
+              reasoningEffort = provider ? settings.defaultReasoningEffort[provider] : null;
+            "
+          >
             <option value="">None</option>
             <option value="workers-ai">Workers AI</option>
             <option value="openrouter">OpenRouter</option>
             <option value="openai">OpenAI</option>
           </select>
         </div>
-        <div v-if="provider">
-          <label for="model">Model</label
-          ><input
-            id="model"
-            v-model="model"
-            :placeholder="settings.defaultModels[provider]"
-            maxlength="200"
-          /><small class="muted">Leave blank to use {{ settings.defaultModels[provider] }}.</small>
+        <div v-if="provider" class="model-settings">
+          <div>
+            <label for="model">Model</label
+            ><input
+              id="model"
+              v-model="model"
+              :placeholder="settings.defaultModels[provider]"
+              maxlength="200"
+            /><small class="muted"
+              >Leave blank to use {{ settings.defaultModels[provider] }}.</small
+            >
+          </div>
+          <div>
+            <label for="reasoning-effort">Reasoning effort</label>
+            <select id="reasoning-effort" v-model="reasoningEffort">
+              <option :value="null">Provider default</option>
+              <option value="none">None</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <small class="muted"
+              >Provider default: {{ settings.defaultReasoningEffort[provider] ?? "unspecified" }}.
+              Applies to the default model; explicit models omit effort unless selected.
+            </small>
+          </div>
         </div>
         <div v-for="name in externalProviders" :key="name">
           <div class="row spread">
@@ -192,6 +227,11 @@ function savePrompt(kind: "tagging" | "summary", reset = false) {
   </section>
 </template>
 <style scoped>
+.model-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
 .prompts {
   margin-top: 2.5rem;
 }

@@ -5,7 +5,11 @@ import { z } from "zod";
 import { profiles } from "../../../db/schema.ts";
 import { profileFor } from "../../../lib/http.ts";
 import { publicSettings } from "../../../lib/settings.ts";
-import { providerSchema } from "../../../lib/providers.ts";
+import {
+  DEFAULT_REASONING_EFFORT,
+  providerSchema,
+  reasoningEffortSchema,
+} from "../../../lib/providers.ts";
 import { encrypt } from "../../../lib/crypto.ts";
 
 export const GET = defineHandler(async (c) => publicSettings(await profileFor(c)));
@@ -14,6 +18,7 @@ export const PATCH = defineHandler.withValidator({
     .object({
       provider: providerSchema.nullable().optional(),
       model: z.string().trim().min(1).max(200).nullable().optional(),
+      reasoningEffort: reasoningEffortSchema.nullable().optional(),
       autoTag: z.boolean().optional(),
       autoSummary: z.boolean().optional(),
       keys: z
@@ -31,6 +36,12 @@ export const PATCH = defineHandler.withValidator({
   const changes: Partial<typeof profiles.$inferInsert> = { ...settings };
   if (body.provider !== undefined && body.provider !== profile.provider && body.model === undefined)
     changes.model = null;
+  if (
+    body.provider !== undefined &&
+    body.provider !== profile.provider &&
+    body.reasoningEffort === undefined
+  )
+    changes.reasoningEffort = body.provider ? DEFAULT_REASONING_EFFORT[body.provider] : null;
   for (const provider of ["openai", "openrouter"] as const) {
     const value = keys?.[provider];
     if (value !== undefined)

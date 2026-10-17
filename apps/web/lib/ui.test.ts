@@ -18,23 +18,15 @@ describe("JSON API client", () => {
       }),
     );
   });
-  it("preserves duplicate bookmark details for the friendly existing-link message", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { error: "Already saved", existingBookmarkId: "bookmark-1" },
-            { status: 409 },
-          ),
-        ),
-    );
-    await expect(api("/api/bookmarks")).rejects.toMatchObject({
-      status: 409,
-      message: "Already saved",
-      data: { existingBookmarkId: "bookmark-1" },
-    });
+  it("returns a duplicate save as success with its bookmark and flag", async () => {
+    const result = { bookmark: { id: "bookmark-1" }, alreadyExists: true };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(result)));
+    await expect(
+      api("/api/bookmarks", {
+        method: "POST",
+        body: { url: "https://example.com/" },
+      }),
+    ).resolves.toEqual(result);
   });
   it("redirects protected requests on 401 but keeps bad-password errors on the form", async () => {
     const assign = vi.fn();

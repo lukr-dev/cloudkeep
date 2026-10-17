@@ -8,6 +8,7 @@ export const profiles = sqliteTable("profiles", {
     .default("user"),
   provider: text("provider", { enum: ["workers-ai", "openrouter", "openai"] }),
   model: text("model"),
+  reasoningEffort: text("reasoning_effort", { enum: ["none", "low", "medium", "high"] }),
   openaiKey: text("openai_key"),
   openrouterKey: text("openrouter_key"),
   autoTag: integer("auto_tag", { mode: "boolean" }).notNull().default(true),

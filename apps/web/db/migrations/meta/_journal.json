@@ -8,6 +8,13 @@
       "when": 1792236628324,
       "tag": "20261017113028_fearless_taskmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792238910551,
+      "tag": "20261017120830_special_hairball",
+      "breakpoints": true
     }
   ]
 }

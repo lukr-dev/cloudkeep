@@ -115,15 +115,39 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
     ),
   ]);
   if (!created[0]) {
-    const [existing] = await db
-      .select({ id: bookmarks.id })
-      .from(bookmarks)
-      .where(and(eq(bookmarks.userId, userId), eq(bookmarks.url, body.url)));
-    return c.json({ error: "URL already bookmarked", existingBookmarkId: existing!.id }, 409);
+    const where = and(eq(bookmarks.userId, userId), eq(bookmarks.url, body.url));
+    const bumpedAt = Date.now();
+    const [updated] = await db.batch([
+      db
+        .update(bookmarks)
+        .set({
+          ...(body.title !== undefined ? { title: body.title, titleEdited: true } : {}),
+          ...(body.description !== undefined
+            ? { description: body.description, descriptionEdited: true }
+            : {}),
+          // Break millisecond ties so re-saving always moves the bookmark to the top.
+          createdAt: sql`max(${bumpedAt}, (select max(created_at) + 1 from bookmarks where user_id = ${userId}))`,
+          updatedAt: bumpedAt,
+        })
+        .where(where)
+        .returning(),
+      db
+        .insert(bookmarkLists)
+        .select(
+          db
+            .select({ bookmarkId: bookmarks.id, listId: lists.id })
+            .from(bookmarks)
+            .innerJoin(lists, eq(lists.userId, userId))
+            .where(and(where, body.listIds.length ? inArray(lists.id, body.listIds) : sql`0`)),
+        )
+        .onConflictDoNothing(),
+    ]);
+    return c.json({ bookmark: publicBookmark(updated[0]!), alreadyExists: true }, 200);
   }
   const queued = await enqueue({ bookmarkId: id, userId, runId });
   return c.json(
     {
+      alreadyExists: false,
       bookmark: publicBookmark({
         ...created[0],
         ...(queued

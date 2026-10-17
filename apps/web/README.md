@@ -36,7 +36,7 @@ The Vue interface uses Void file-based pages and client navigation, with no UI f
 - `/`: add links with an optional list, browse metadata, search/filter by `q`, `listId`, and `tag` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. Desktop lists/tags become select filters on mobile.
 - `/b/:id`: edit title/description, read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
 - `/lists`: create, rename, and delete lists while keeping their bookmarks.
-- `/settings`: provider/model, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.
+- `/settings`: provider/model/reasoning effort, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.
 - `/admin/invites`: admin-only invitation creation with optional expiry, one-time link copying, paginated history, and revocation.
 
 The interface follows system light/dark appearance, uses native labeled controls and visible keyboard focus, and shows loading, empty, and API error states. UI helper tests are in `lib/ui.test.ts`.
@@ -60,13 +60,17 @@ No deployment or account login was performed during implementation. Void infers 
 
 External OpenAI/OpenRouter requests go directly to their documented chat-completions endpoints with the selected user's decrypted API key. Void's `ai.provider()` uses project-wide secrets/Gateway credentials, so it is deliberately not used for per-user keys. There is no OAuth or subscription authentication. Default models:
 
-| Provider     | Default model                        | Key                         |
-| ------------ | ------------------------------------ | --------------------------- |
-| `workers-ai` | `@cf/meta/llama-3.1-8b-instruct-fp8` | None                        |
-| `openrouter` | `openai/gpt-4o-mini`                 | Per-user OpenRouter API key |
-| `openai`     | `gpt-4o-mini`                        | Per-user OpenAI API key     |
+| Provider     | Default model                   | Key                         |
+| ------------ | ------------------------------- | --------------------------- |
+| `workers-ai` | `@cf/google/gemma-4-26b-a4b-it` | None                        |
+| `openrouter` | `deepseek/deepseek-v4.1-flash`  | Per-user OpenRouter API key |
+| `openai`     | `gpt-5.6-luna`                  | Per-user OpenAI API key     |
 
-Models are free-text IDs. Changing providers resets the selected model to that provider's default unless a model is supplied in the same PATCH. Each external provider retains its own key until explicitly cleared. External provider calls time out after 12 seconds and use at most 1,024 output tokens (`max_completion_tokens` for OpenAI, `max_tokens` elsewhere) (8 for a connection test); returned summaries are capped at 4,000 characters. Upstream error bodies and raw SDK errors are never returned to clients or stored in bookmark errors.
+Models are free-text IDs. Settings return the stored `model` (`null` uses the current provider default), so saving unrelated settings does not pin a default model. Existing explicit models stay unchanged. Changing providers resets the model to `null` unless a model is supplied in the same PATCH.
+
+`reasoningEffort` is `"none" | "low" | "medium" | "high" | null`. Provider defaults (`defaultReasoningEffort`) are OpenAI `"low"`, Workers AI/OpenRouter `null`. Changing providers resets effort to that provider's default unless explicitly supplied in the same PATCH. Effective effort is the stored non-null value; otherwise the provider default applies only when `model` is also null. An explicit model with null effort sends no parameter. OpenAI and Workers AI receive `reasoning_effort`; OpenRouter receives [`reasoning: { effort }`](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens). No effort parameter is sent for an effective null, including Gemma 4 by default (its Workers AI types expose no effort levels). User-selected effort must be supported by the selected model.
+
+Workers AI uses `max_completion_tokens` and reads `choices[0].message.content`, falling back to legacy `response`. Reasoning content is never an answer; empty/whitespace-only content fails with an output-budget hint. See the [Gemma model contract](https://developers.cloudflare.com/workers-ai/models/gemma-4-26b-a4b-it/). Each external provider retains its own key until explicitly cleared. External provider calls time out after 12 seconds and use at most 1,024 output tokens (`max_completion_tokens` for OpenAI/Workers AI, `max_tokens` for OpenRouter) (256 for a connection test, so reasoning models have room to answer); returned summaries are capped at 4,000 characters. Upstream error bodies and raw SDK errors are never returned to clients or stored in bookmark errors.
 
 ## Migrations and validation
 
@@ -120,7 +124,7 @@ The response includes `token` in JSON and `set-auth-token` in its headers. Send 
 
 All timestamps on application resources are integer Unix milliseconds. IDs are UUID strings. Nullable extracted fields are `null`. Requests containing JSON use `Content-Type: application/json`; no-body action examples below use `{}`. Unknown body fields are rejected. JSON bodies are limited to 64 KiB before parsing. Query/param validation uses Void's Zod validators; invalid input returns `400 { error: "Validation failed", issues: [...] }`. Other errors use `{ error: string }`; unauthorized requests return 401, forbidden admin requests 403, foreign/missing resource IDs 404. Responses use `Cache-Control: no-store`.
 
-`Pagination` means `?limit=20&offset=0` (limit 1–50, offset 0–100000). Bookmarks are ordered by creation time/id descending, lists by name/id, tags by name. Offset pagination may shift when items are inserted/deleted.
+`Pagination` means `?limit=20&offset=0` (limit 1–50, offset 0–100000). Bookmarks are ordered by `createdAt`/id descending, lists by name/id, tags by name. Re-saving a normalized URL for the same user bumps `createdAt` to now (or one millisecond past the collection maximum to break ties) and `updatedAt` to now. `createdAt` therefore represents the latest save, as in Karakeep; no extra sort column is needed. Offset pagination may shift when items are inserted, re-saved or deleted.
 
 ```ts
 type Bookmark = {
@@ -154,50 +158,57 @@ type Invite = {
 type Prompt = { template: string; defaultTemplate: string; isDefault: boolean };
 type Settings = {
   provider: "workers-ai" | "openrouter" | "openai" | null;
-  model: string | null;
+  model: string | null; // null uses the provider default
+  reasoningEffort: "none" | "low" | "medium" | "high" | null;
   autoTag: boolean;
   autoSummary: boolean;
   keys: { openai: { hasKey: boolean }; openrouter: { hasKey: boolean } };
   defaultModels: Record<"workers-ai" | "openrouter" | "openai", string>;
+  defaultReasoningEffort: Record<
+    "workers-ai" | "openrouter" | "openai",
+    Settings["reasoningEffort"]
+  >;
 };
 ```
 
-| Method | Path                               | Input                                               | Success                                                                                        |
-| ------ | ---------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| GET    | `/api/setup/status`                | Public                                              | `{ needsSetup: boolean }`                                                                      |
-| POST   | `/api/setup`                       | Public `{ email, password, name }`                  | 201 `{ user: { id, email, name, role: 'admin' } }`; 409 when closed                            |
-| POST   | `/api/register`                    | Public `{ email, password, name, inviteCode }`      | 201 `{ user: { id, email, name, role: 'user' } }`; 409 invalid/used invite or existing account |
-| POST   | `/api/auth/sign-in/email`          | Public `{ email, password }`, app Origin            | Better Auth `{ user, token, redirect, ... }`, session cookie and `set-auth-token` header       |
-| GET    | `/api/auth/get-session`            | Session cookie or bearer                            | Better Auth `{ user, session }` or `null`                                                      |
-| POST   | `/api/auth/sign-out`               | Session cookie or bearer, `{}`                      | Better Auth `{ success: true }`                                                                |
-| GET    | `/api/me`                          | Authenticated                                       | `{ user: BetterAuthUser & { role: 'admin'                                                      | 'user' } }`                                                     |
-| GET    | `/api/admin/invites`               | Admin; `?limit=50&offset=0` (max 100/10000)         | `{ items: Invite[], limit, offset }`                                                           |
-| POST   | `/api/admin/invites`               | Admin `{ expiresAt?: number                         | null }` (future)                                                                               | 201 `{ invite: Invite, code: string }`; code is shown only once |
-| DELETE | `/api/admin/invites/:id`           | Admin                                               | `{ ok: true }`; revokes without deleting history                                               |
-| GET    | `/api/bookmarks`                   | Pagination; optional `listId`, `tag` (name), `q`    | `{ items: BookmarkListItem[], total, limit, offset }`                                          |
-| POST   | `/api/bookmarks`                   | `{ url, title?: string                              | null, description?: string                                                                     | null, listIds?: string[] }`                                     | 201 `{ bookmark: Bookmark }`; 409 `{ error, existingBookmarkId }` |
-| GET    | `/api/bookmarks/:id`               | Owner                                               | `{ bookmark: BookmarkDetail }`                                                                 |
-| PATCH  | `/api/bookmarks/:id`               | Owner `{ title?: string                             | null, description?: string                                                                     | null }`, at least one                                           | `{ bookmark: Bookmark }`                                          |
-| DELETE | `/api/bookmarks/:id`               | Owner                                               | `{ ok: true }`; cascades memberships/tags, keeps lists and tag names                           |
-| POST   | `/api/bookmarks/:id/reprocess`     | Owner `{}`                                          | 202 `{ bookmark: Bookmark }`; 503 with failed bookmark when enqueue fails                      |
-| POST   | `/api/bookmarks/:id/tags`          | Owner `{ name: string }`                            | `{ tag: TagLink }`; promotes an AI tag to manual                                               |
-| DELETE | `/api/bookmarks/:id/tags/:tagId`   | Owner                                               | `{ ok: true }`                                                                                 |
-| PUT    | `/api/bookmarks/:id/lists/:listId` | Owner of both, `{}`                                 | `{ ok: true }`; idempotent membership                                                          |
-| DELETE | `/api/bookmarks/:id/lists/:listId` | Owner of both                                       | `{ ok: true }`                                                                                 |
-| GET    | `/api/lists`                       | Pagination                                          | `{ items: Array<Omit<List,'userId'> & { count: number }>, limit, offset }`                     |
-| POST   | `/api/lists`                       | `{ name: string }`                                  | 201 `{ list: List }`                                                                           |
-| GET    | `/api/lists/:id`                   | Owner                                               | `{ list: List }`                                                                               |
-| PATCH  | `/api/lists/:id`                   | Owner `{ name: string }`                            | `{ list: List }`                                                                               |
-| DELETE | `/api/lists/:id`                   | Owner                                               | `{ ok: true }`; bookmarks survive                                                              |
-| GET    | `/api/tags`                        | Pagination                                          | `{ items: { id, name, count }[], limit, offset }`; unused tags have count 0                    |
-| GET    | `/api/settings`                    | Authenticated                                       | `Settings`                                                                                     |
-| PATCH  | `/api/settings`                    | `{ provider?, model?: string                        | null, autoTag?, autoSummary?, keys?: { openai?: string                                         | null, openrouter?: string                                       | null } }`                                                         | `Settings`; omit key to keep, `null` to clear |
-| POST   | `/api/settings/ai/test`            | `{}`; tests **saved** settings                      | `{ ok: true }`; 400 no provider, 502 upstream/config failure                                   |
-| GET    | `/api/settings/prompts`            | Authenticated                                       | `{ tagging: Prompt, summary: Prompt, variables: string[] }`                                    |
-| PUT    | `/api/settings/prompts/:kind`      | `{ template: string }`; kind `tagging` or `summary` | `Prompt`                                                                                       |
-| DELETE | `/api/settings/prompts/:kind`      | Kind `tagging` or `summary`                         | Reset to default; returns `Prompt`                                                             |
+| Method | Path                               | Input                                                                                                                                       | Success                                                                                               |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| GET    | `/api/setup/status`                | Public                                                                                                                                      | `{ needsSetup: boolean }`                                                                             |
+| POST   | `/api/setup`                       | Public `{ email, password, name }`                                                                                                          | 201 `{ user: { id, email, name, role: 'admin' } }`; 409 when closed                                   |
+| POST   | `/api/register`                    | Public `{ email, password, name, inviteCode }`                                                                                              | 201 `{ user: { id, email, name, role: 'user' } }`; 409 invalid/used invite or existing account        |
+| POST   | `/api/auth/sign-in/email`          | Public `{ email, password }`, app Origin                                                                                                    | Better Auth `{ user, token, redirect, ... }`, session cookie and `set-auth-token` header              |
+| GET    | `/api/auth/get-session`            | Session cookie or bearer                                                                                                                    | Better Auth `{ user, session }` or `null`                                                             |
+| POST   | `/api/auth/sign-out`               | Session cookie or bearer, `{}`                                                                                                              | Better Auth `{ success: true }`                                                                       |
+| GET    | `/api/me`                          | Authenticated                                                                                                                               | `{ user: BetterAuthUser & { role: 'admin'                                                             | 'user' } }`                                                     |
+| GET    | `/api/admin/invites`               | Admin; `?limit=50&offset=0` (max 100/10000)                                                                                                 | `{ items: Invite[], limit, offset }`                                                                  |
+| POST   | `/api/admin/invites`               | Admin `{ expiresAt?: number                                                                                                                 | null }` (future)                                                                                      | 201 `{ invite: Invite, code: string }`; code is shown only once |
+| DELETE | `/api/admin/invites/:id`           | Admin                                                                                                                                       | `{ ok: true }`; revokes without deleting history                                                      |
+| GET    | `/api/bookmarks`                   | Pagination; optional `listId`, `tag` (name), `q`                                                                                            | `{ items: BookmarkListItem[], total, limit, offset }`                                                 |
+| POST   | `/api/bookmarks`                   | `{ url, title?, description?, listIds? }`; nullable title/description                                                                       | 201 `{ bookmark: Bookmark, alreadyExists: false }`; 200 `{ bookmark: Bookmark, alreadyExists: true }` |
+| GET    | `/api/bookmarks/:id`               | Owner                                                                                                                                       | `{ bookmark: BookmarkDetail }`                                                                        |
+| PATCH  | `/api/bookmarks/:id`               | Owner `{ title?: string                                                                                                                     | null, description?: string                                                                            | null }`, at least one                                           | `{ bookmark: Bookmark }` |
+| DELETE | `/api/bookmarks/:id`               | Owner                                                                                                                                       | `{ ok: true }`; cascades memberships/tags, keeps lists and tag names                                  |
+| POST   | `/api/bookmarks/:id/reprocess`     | Owner `{}`                                                                                                                                  | 202 `{ bookmark: Bookmark }`; 503 with failed bookmark when enqueue fails                             |
+| POST   | `/api/bookmarks/:id/tags`          | Owner `{ name: string }`                                                                                                                    | `{ tag: TagLink }`; promotes an AI tag to manual                                                      |
+| DELETE | `/api/bookmarks/:id/tags/:tagId`   | Owner                                                                                                                                       | `{ ok: true }`                                                                                        |
+| PUT    | `/api/bookmarks/:id/lists/:listId` | Owner of both, `{}`                                                                                                                         | `{ ok: true }`; idempotent membership                                                                 |
+| DELETE | `/api/bookmarks/:id/lists/:listId` | Owner of both                                                                                                                               | `{ ok: true }`                                                                                        |
+| GET    | `/api/lists`                       | Pagination                                                                                                                                  | `{ items: Array<Omit<List,'userId'> & { count: number }>, limit, offset }`                            |
+| POST   | `/api/lists`                       | `{ name: string }`                                                                                                                          | 201 `{ list: List }`                                                                                  |
+| GET    | `/api/lists/:id`                   | Owner                                                                                                                                       | `{ list: List }`                                                                                      |
+| PATCH  | `/api/lists/:id`                   | Owner `{ name: string }`                                                                                                                    | `{ list: List }`                                                                                      |
+| DELETE | `/api/lists/:id`                   | Owner                                                                                                                                       | `{ ok: true }`; bookmarks survive                                                                     |
+| GET    | `/api/tags`                        | Pagination                                                                                                                                  | `{ items: { id, name, count }[], limit, offset }`; unused tags have count 0                           |
+| GET    | `/api/settings`                    | Authenticated                                                                                                                               | `Settings`                                                                                            |
+| PATCH  | `/api/settings`                    | `{ provider?, model?, reasoningEffort?, autoTag?, autoSummary?, keys?: { openai?, openrouter? } }`; settings fields as above, nullable keys | `Settings`; omit key to keep, `null` to clear                                                         |
+| POST   | `/api/settings/ai/test`            | `{}`; tests **saved** settings                                                                                                              | `{ ok: true }`; 400 no provider, 502 upstream/config failure                                          |
+| GET    | `/api/settings/prompts`            | Authenticated                                                                                                                               | `{ tagging: Prompt, summary: Prompt, variables: string[] }`                                           |
+| PUT    | `/api/settings/prompts/:kind`      | `{ template: string }`; kind `tagging` or `summary`                                                                                         | `Prompt`                                                                                              |
+| DELETE | `/api/settings/prompts/:kind`      | Kind `tagging` or `summary`                                                                                                                 | Reset to default; returns `Prompt`                                                                    |
 
-The create response is the bookmark snapshot before processing; poll GET detail/list for updated status. A queue-publish failure on create still returns 201 with `status: 'failed'` because the bookmark was saved. Creation can include up to 30 owned list IDs. Title/description limits are 1,000/4,000 characters; supplying them on create counts as a manual edit, including an explicit `null`. Lists have names of 1–100 characters. Tags are trimmed/lowercased, 1–40 characters. URL changes are intentionally not part of PATCH; create a new bookmark for another URL. Text search is literal LIKE matching on title, URL and description; `%`, `_` and backslash are escaped.
+Duplicate URLs match exactly after the existing normalization (tracking parameters/fragments removed, query sorted, host lowercased); `/a` and `/a/` remain distinct. Duplicate saves, including concurrent creates, return 200 with the existing bookmark, bump it, add supplied owned list memberships, and apply supplied title/description as manual edits (including null). Omitted metadata, existing lists, tags, status and processing run are preserved; duplicates do not enqueue processing.
+
+The new-create response is the bookmark snapshot before processing; poll GET detail/list for updated status. A queue-publish failure on create still returns 201 with `status: 'failed'` because the bookmark was saved. Creation can include up to 30 owned list IDs. Title/description limits are 1,000/4,000 characters; supplying them on create counts as a manual edit, including an explicit `null`. Lists have names of 1–100 characters. Tags are trimmed/lowercased, 1–40 characters. URL changes are intentionally not part of PATCH; create a new bookmark for another URL. Text search is literal LIKE matching on title, URL and description; `%`, `_` and backslash are escaped.
 
 ## Editable prompts
 
