@@ -6,6 +6,7 @@ import { sessionKey } from "../composables/session.ts";
 import { toast } from "../composables/toast.ts";
 import Icon from "../components/Icon.vue";
 import "../style.css";
+const repository = "https://github.com/lukr-dev/cloudkeep";
 const router = useRouter();
 const user = ref<User | null>(null);
 provide(sessionKey, user);
@@ -109,6 +110,24 @@ async function signOut() {
     <slot v-if="ready" />
     <p v-else-if="!error" role="status" class="sr-only">Loading</p>
   </main>
+  <footer class="footer">
+    <div class="shell">
+      <p class="footer-brand">
+        <span class="brand-mark"><Icon name="mark" :size="11" /></span>
+        <span
+          ><strong>CloudKeep</strong> · Simple bookmarking that runs entirely on Cloudflare.</span
+        >
+      </p>
+      <nav class="footer-links" aria-label="Project">
+        <a :href="repository" target="_blank" rel="noopener noreferrer"
+          ><Icon name="github" :size="14" />GitHub</a
+        >
+        <a :href="`${repository}/issues`" target="_blank" rel="noopener noreferrer"
+          >Report an issue</a
+        >
+      </nav>
+    </div>
+  </footer>
   <Transition name="toast">
     <div v-if="toast" :key="toast.id" class="toast" role="status" aria-live="polite">
       <Icon name="check" :size="14" />{{ toast.text }}

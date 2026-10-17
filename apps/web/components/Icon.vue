@@ -1,7 +1,16 @@
 <script setup lang="ts">
 // A handful of 16px line icons; keeps the UI dependency-free.
 defineProps<{
-  name: "search" | "external" | "plus" | "x" | "arrow-left" | "mark" | "refresh" | "check";
+  name:
+    | "search"
+    | "external"
+    | "plus"
+    | "x"
+    | "arrow-left"
+    | "mark"
+    | "refresh"
+    | "check"
+    | "github";
   size?: number;
 }>();
 </script>
@@ -31,5 +40,9 @@ defineProps<{
       d="M12.75 5.5A5 5 0 0 0 3.5 6M3.25 10.5A5 5 0 0 0 12.5 10M12.75 2.75V5.5H10M3.25 13.25V10.5H6"
     />
     <path v-else-if="name === 'check'" d="m3.5 8.25 3 3 6-6.5" />
+    <path
+      v-else-if="name === 'github'"
+      d="M6 12.75c-2.5.75-2.5-1.25-3.5-1.5m7 3v-1.94a1.7 1.7 0 0 0-.47-1.31c1.57-.18 3.22-.77 3.22-3.5a2.72 2.72 0 0 0-.75-1.88 2.53 2.53 0 0 0-.05-1.87s-.59-.18-1.95.73a6.7 6.7 0 0 0-3.5 0C4.64 3.57 4.05 3.75 4.05 3.75A2.53 2.53 0 0 0 4 5.62a2.72 2.72 0 0 0-.75 1.89c0 2.72 1.65 3.31 3.22 3.5a1.7 1.7 0 0 0-.47 1.29v1.95"
+    />
   </svg>
 </template>

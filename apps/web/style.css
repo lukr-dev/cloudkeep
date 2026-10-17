@@ -258,6 +258,11 @@ label,
 }
 
 /* Shell */
+#app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
 .shell {
   max-width: 1080px;
   margin: 0 auto;
@@ -329,8 +334,55 @@ label,
   background: transparent;
 }
 .main {
+  flex: 1;
+  width: 100%;
   padding-top: 2.25rem;
   padding-bottom: 5rem;
+}
+.footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.footer .shell {
+  min-height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  flex-wrap: wrap;
+  padding-block: 0.75rem;
+}
+.footer-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.footer-brand strong {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.footer-brand .brand-mark {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.1rem;
+  border-radius: 5px;
+}
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+.footer-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: color 0.15s var(--ease);
+}
+.footer-links a:hover {
+  color: var(--text);
 }
 .narrow {
   max-width: 640px;
