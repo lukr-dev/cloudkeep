@@ -1,0 +1,112 @@
+name: Mobile Android
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/lib/api.ts"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "vite.config.ts"
+      - ".github/workflows/mobile-android.yml"
+  push:
+    branches: ["**"]
+    tags: ["mobile-v*"]
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/lib/api.ts"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "vite.config.ts"
+      - ".github/workflows/mobile-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: vp check && vp test && vp run mobile#typecheck
+      - run: ./gradlew assembleDebug testDebugUnitTest --console=plain
+        working-directory: apps/mobile/android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudkeep-android-debug
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/mobile-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require release signing secrets
+        shell: bash
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing $name. A release APK must use your release keystore."
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cloudkeep-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/cloudkeep-release.jks" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: vp check && vp test && vp run mobile#typecheck
+      - name: Build signed release
+        working-directory: apps/mobile/android
+        shell: bash
+        run: |
+          ./gradlew testDebugUnitTest assembleRelease --console=plain \
+            -PversionName="${GITHUB_REF_NAME#mobile-v}" -PversionCode="$GITHUB_RUN_NUMBER"
+          cp app/build/outputs/apk/release/app-release.apk "cloudkeep-${GITHUB_REF_NAME}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: apps/mobile/android/cloudkeep-mobile-v*.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/cloudkeep-release.jks"
