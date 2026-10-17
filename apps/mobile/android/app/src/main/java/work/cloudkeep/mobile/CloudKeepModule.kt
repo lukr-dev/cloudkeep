@@ -28,7 +28,10 @@ class CloudKeepModule(context: Context) : LynxModule(context) {
                     "setShareSettings" -> { store.shareSettings(args.getString("shareMode"), args.getString("defaultList")); true }
                     "getPendingSharedUrl" -> store.pendingUrl
                     "clearPendingSharedUrl" -> { store.pending(""); true }
-                    "request" -> ApiClient().request(store.server, store.token, args.getString("path"), args.optString("method", "GET"), if (args.has("body")) args.getString("body") else null)
+                    "request" -> {
+                        val state = store.snapshot()
+                        ApiClient().request(state.getString("server"), state.getString("token"), args.getString("path"), args.optString("method", "GET"), if (args.has("body")) args.getString("body") else null)
+                    }
                     "openUrl" -> {
                         val url = args.getString("url")
                         require(Uri.parse(url).scheme in listOf("https", "http")) { "Only HTTP(S) links can be opened" }

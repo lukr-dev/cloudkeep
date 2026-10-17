@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(
+import { inputBinding } from "./input.ts";
+
+const props = withDefaults(
   defineProps<{
     label: string;
     value: string;
@@ -10,17 +12,22 @@ withDefaults(
   { placeholder: "", password: false, maxLength: 8000 },
 );
 const emit = defineEmits<{ change: [value: string] }>();
+const binding = inputBinding(
+  () => props.value,
+  (value) => emit("change", value),
+);
 </script>
 <template>
   <view class="field">
     <text class="label">{{ label }}</text>
     <input
-      :value="value"
+      :id="binding.id"
+      :default-value="binding.initialValue"
       :placeholder="placeholder"
       :type="password ? 'password' : 'text'"
       :maxlength="maxLength"
       :accessibility-label="label"
-      @input="emit('change', $event.detail.value)"
+      @input="binding.input($event.detail.value)"
     />
   </view>
 </template>

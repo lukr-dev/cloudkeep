@@ -19,25 +19,25 @@ class SecureStore(context: Context) {
     val defaultList: String get() = preferences.getString("defaultList", "")!!
     val pendingUrl: String get() = preferences.getString("pendingUrl", "")!!
 
-    fun snapshot(): JSONObject = JSONObject().put("server", server).put("token", token)
+    @Synchronized fun snapshot(): JSONObject = JSONObject().put("server", server).put("token", token)
         .put("shareMode", mode).put("defaultList", defaultList).put("pendingUrl", pendingUrl)
 
-    fun credentials(server: String, token: String) {
+    @Synchronized fun credentials(server: String, token: String) {
         val normalized = ApiClient.normalizeServer(server)
         val editor = preferences.edit().putString("server", normalized).putString("token", token)
         // Defaults belong to one account, and must never cross an account/server change.
         editor.remove("defaultList")
         check(editor.commit()) { "Could not store credentials" }
     }
-    fun clearCredentials() {
+    @Synchronized fun clearCredentials() {
         check(preferences.edit().remove("token").remove("defaultList").commit()) { "Could not clear credentials" }
     }
-    fun shareSettings(mode: String, list: String) {
+    @Synchronized fun shareSettings(mode: String, list: String) {
         require(mode in listOf("ask", "quick")) { "Invalid share mode" }
         require(list.isEmpty() || runCatching { java.util.UUID.fromString(list) }.isSuccess) { "Invalid default list" }
         check(preferences.edit().putString("shareMode", mode).putString("defaultList", list).commit()) { "Could not store share settings" }
     }
-    fun pending(url: String) { check(preferences.edit().putString("pendingUrl", url).commit()) { "Could not store shared URL" } }
+    @Synchronized fun pending(url: String) { check(preferences.edit().putString("pendingUrl", url).commit()) { "Could not store shared URL" } }
 
     companion object { const val DEFAULT_SERVER = "https://cloudkeep.toastnet.work" }
 }

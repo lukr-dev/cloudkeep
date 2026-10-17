@@ -56,7 +56,7 @@ val copyLynxBundle by tasks.registering(Sync::class) {
 }
 tasks.named("preBuild") { dependsOn(copyLynxBundle) }
 tasks.configureEach {
-    if (name == "validateSigningRelease") doFirst {
+    if (name == "preReleaseBuild") doFirst {
         check(canSign) { "Release signing requires ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. Refusing an unsigned release." }
     }
 }

@@ -19,9 +19,10 @@ class ShareActivity : Activity() {
         CloudKeepApplication.io.execute {
             try {
                 val store = (application as CloudKeepApplication).store
-                if (store.mode == "quick" && store.token.isNotEmpty()) {
+                val state = store.snapshot()
+                if (state.getString("shareMode") == "quick" && state.getString("token").isNotEmpty()) {
                     try {
-                        val duplicate = ApiClient().save(store.server, store.token, url, store.defaultList)
+                        val duplicate = ApiClient().save(state.getString("server"), state.getString("token"), url, state.getString("defaultList"))
                         runOnUiThread {
                             Toast.makeText(this, if (duplicate) "Already saved" else "Saved to CloudKeep", Toast.LENGTH_LONG).show()
                             finish()
