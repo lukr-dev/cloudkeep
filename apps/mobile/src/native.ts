@@ -1,9 +1,12 @@
+import type { List } from "./api.ts";
+
 export type NativeState = {
   server: string;
   token: string;
   shareMode: "ask" | "quick";
   defaultList: string;
   pendingUrl: string;
+  lists: List[];
 };
 export type NativeResponse = { status: number; body: string; token: string };
 
@@ -18,6 +21,7 @@ const explorer: NativeState = {
   shareMode: "ask",
   defaultList: "",
   pendingUrl: "",
+  lists: [],
 };
 
 // Explorer has no CloudKeep module: development sessions are deliberately memory-only.
@@ -39,11 +43,16 @@ export async function native<T>(action: string, payload: Record<string, unknown>
     case "getState":
       return { ...explorer } as T;
     case "setCredentials":
-      Object.assign(explorer, payload, { defaultList: "" });
+      Object.assign(explorer, payload, { defaultList: "", lists: [] });
       break;
     case "clearCredentials":
       explorer.token = "";
       explorer.defaultList = "";
+      explorer.lists = [];
+      break;
+    case "cacheLists":
+      if (payload.server === explorer.server && payload.token === explorer.token)
+        explorer.lists = payload.lists as List[];
       break;
     case "setShareSettings":
       Object.assign(explorer, payload);
@@ -78,6 +87,8 @@ export async function native<T>(action: string, payload: Record<string, unknown>
     case "finishShare":
       throw new Error("This action requires the CloudKeep Android host.");
     case "toast":
+    case "frontendReady":
+    case "markTiming":
       break;
     default:
       throw new Error("Unknown native action");

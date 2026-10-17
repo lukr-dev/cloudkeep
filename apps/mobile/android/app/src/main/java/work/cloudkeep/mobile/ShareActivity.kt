@@ -8,6 +8,7 @@ import android.widget.Toast
 class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ShareTiming.mark("share_received")
         val url = if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain")
             ShareUrl.extract(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(), intent.getStringExtra(Intent.EXTRA_SUBJECT)) else null
         if (url == null) {
@@ -15,14 +16,24 @@ class ShareActivity : Activity() {
             finish()
             return
         }
+        val app = application as CloudKeepApplication
+        val shares = app.shares
+        ShareTiming.mark("share_mode_ready")
+        // Legacy installs migrate once off-thread so an existing Quick preference is preserved.
+        if (!shares.needsMigration && shares.mode != "quick") {
+            openAsk(url)
+            return
+        }
         // A fresh activity performs exactly one request; configuration changes do not resend it.
         CloudKeepApplication.io.execute {
             try {
-                val store = (application as CloudKeepApplication).store
+                val store = app.store
                 val state = store.snapshot()
                 if (state.getString("shareMode") == "quick" && state.getString("token").isNotEmpty()) {
                     try {
+                        ShareTiming.mark("quick_save_start")
                         val duplicate = ApiClient().save(state.getString("server"), state.getString("token"), url, state.getString("defaultList"))
+                        ShareTiming.mark("quick_save_ready")
                         runOnUiThread {
                             Toast.makeText(this, if (duplicate) "Already saved" else "Saved to CloudKeep", Toast.LENGTH_LONG).show()
                             finish()
@@ -32,12 +43,7 @@ class ShareActivity : Activity() {
                         runOnUiThread { Toast.makeText(this, "Quick save failed. Review and retry in CloudKeep.", Toast.LENGTH_LONG).show() }
                     }
                 }
-                store.pending(url)
-                runOnUiThread {
-                    startActivity(Intent(this, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                    finish()
-                }
+                runOnUiThread { openAsk(url) }
             } catch (_: Exception) {
                 runOnUiThread {
                     Toast.makeText(this, "Could not access secure storage. Open CloudKeep to sign in again.", Toast.LENGTH_LONG).show()
@@ -45,5 +51,12 @@ class ShareActivity : Activity() {
                 }
             }
         }
+    }
+    private fun openAsk(url: String) {
+        ShareTiming.mark("ask_launch")
+        startActivity(Intent(this, MainActivity::class.java)
+            .putExtra(MainActivity.SHARED_URL, url)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
     }
 }

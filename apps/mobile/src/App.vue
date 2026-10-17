@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
   api,
   allItems,
@@ -23,6 +23,7 @@ const state = ref<NativeState>({
   shareMode: "ask",
   defaultList: "",
   pendingUrl: "",
+  lists: [],
 });
 const ready = ref(false);
 const email = ref("");
@@ -35,6 +36,7 @@ const loading = ref(false);
 const bookmarks = ref<BookmarkItem[]>([]);
 const total = ref(0);
 const lists = ref<List[]>([]);
+const listsLoading = ref(false);
 const tags = ref<Tag[]>([]);
 const q = ref("");
 const listFilter = ref("");
@@ -50,6 +52,7 @@ const shared = ref(false);
 const saved = ref(false);
 const confirm = ref<{ label: string; action: () => Promise<void> }>();
 let loadVersion = 0;
+let catalogVersion = 0;
 
 function message(cause: unknown) {
   return cause instanceof Error ? cause.message : "Something went wrong. Please retry.";
@@ -58,6 +61,10 @@ async function failure(cause: unknown) {
   error.value = message(cause);
   if (cause instanceof ApiError && cause.status === 401) {
     state.value.token = "";
+    ++catalogVersion;
+    lists.value = [];
+    tags.value = [];
+    listsLoading.value = false;
     await native("clearCredentials");
     error.value = "Your session expired. Sign in to continue.";
   }
@@ -76,8 +83,28 @@ async function run(task: () => Promise<void>) {
   }
 }
 async function catalog() {
-  const result = await Promise.all([allItems<List>("/api/lists"), allItems<Tag>("/api/tags")]);
-  [lists.value, tags.value] = result;
+  const version = ++catalogVersion;
+  const { server, token } = state.value;
+  listsLoading.value = true;
+  try {
+    await Promise.all([
+      allItems<List>("/api/lists")
+        .then(async (result) => {
+          if (version !== catalogVersion || token !== state.value.token) return;
+          lists.value = result;
+          await native("cacheLists", { server, token, lists: result });
+          await native("markTiming", { phase: "lists_loaded" });
+        })
+        .finally(() => {
+          if (version === catalogVersion) listsLoading.value = false;
+        }),
+      allItems<Tag>("/api/tags").then((result) => {
+        if (version === catalogVersion && token === state.value.token) tags.value = result;
+      }),
+    ]);
+  } catch (cause) {
+    if (version === catalogVersion && token === state.value.token) throw cause;
+  }
 }
 async function load(more = false) {
   if (more && loading.value) return;
@@ -106,17 +133,6 @@ async function load(more = false) {
 async function refresh() {
   await Promise.all([load(), catalog().catch(failure)]);
 }
-async function pullRefresh() {
-  try {
-    await refresh();
-  } finally {
-    lynx
-      .createSelectorQuery()
-      .select("#bookmark-refresh")
-      .invoke({ method: "finishRefresh" })
-      .exec();
-  }
-}
 async function login() {
   await run(async () => {
     try {
@@ -125,20 +141,25 @@ async function login() {
       password.value = "";
     }
     state.value = await native<NativeState>("getState");
-    await catalog();
+    lists.value = state.value.lists;
     if (state.value.pendingUrl) beginShare(state.value.pendingUrl);
     else {
       screen.value = "bookmarks";
       await load();
     }
+    void catalog().catch(failure);
   });
 }
 function beginShare(value: string) {
+  error.value = "";
+  notice.value = "";
+  confirm.value = undefined;
   shared.value = true;
   saved.value = false;
   url.value = value;
   selectedLists.value = [];
   screen.value = "add";
+  void nextTick().then(() => native("markTiming", { phase: "js_picker_committed" }));
 }
 async function navigate(next: Screen) {
   if (busy.value) return;
@@ -307,6 +328,8 @@ async function logout() {
       state.value.token = "";
       state.value.defaultList = "";
       ++loadVersion;
+      ++catalogVersion;
+      listsLoading.value = false;
       bookmarks.value = [];
       lists.value = [];
       tags.value = [];
@@ -323,14 +346,28 @@ async function open(url: string) {
   });
 }
 
+const shareEvents = lynx.getJSModule("GlobalEventEmitter");
+function receiveShare(value: unknown) {
+  if (typeof value !== "string" || !value) return;
+  if (shared.value && url.value === value && !saved.value) return;
+  beginShare(value);
+  if (state.value.token) void catalog().catch(failure);
+}
 onMounted(async () => {
+  // Register before reading state; the native handshake replays shares received during startup.
+  shareEvents.addListener("cloudkeepShare", receiveShare);
   try {
     state.value = await native<NativeState>("getState");
     server.value = state.value.server;
+    lists.value = state.value.lists;
+    listsLoading.value = !!state.value.token;
     if (state.value.pendingUrl) beginShare(state.value.pendingUrl);
+    ready.value = true;
+    void native("markTiming", { phase: "js_state_ready" });
+    await native("frontendReady");
     if (state.value.token) {
-      await catalog();
-      if (!shared.value) await load();
+      void catalog().catch(failure);
+      if (!shared.value) void load();
     }
   } catch (cause) {
     await failure(cause);
@@ -338,6 +375,7 @@ onMounted(async () => {
     ready.value = true;
   }
 });
+onUnmounted(() => shareEvents.removeListener("cloudkeepShare", receiveShare));
 </script>
 
 <template>
@@ -464,78 +502,62 @@ onMounted(async () => {
             "
           />
         </scroll-view>
-        <refresh
-          v-else
-          id="bookmark-refresh"
-          class="feed"
-          :enable-refresh="true"
-          @startrefresh="pullRefresh"
-        >
-          <refresh-header class="refresh-header"
-            ><text class="muted">Refreshing…</text></refresh-header
+        <!-- shortcut: ordinary rows avoid Vue Lynx 0.5.1's append-only list adapter;
+             restore virtualization/pull-to-refresh after its dynamic list support is fixed. -->
+        <scroll-view v-else class="feed" scroll-orientation="vertical">
+          <view v-if="!bookmarks.length"
+            ><text class="status">{{
+              loading
+                ? "Loading bookmarks…"
+                : error
+                  ? "Could not load bookmarks. Retry above."
+                  : "No bookmarks here yet. Save a link to get started."
+            }}</text></view
           >
-          <list class="feed" list-type="single" scroll-orientation="vertical">
-            <list-item v-if="!bookmarks.length" key="empty" v-bind="{ 'item-key': 'empty' }"
-              ><text class="status">{{
-                loading
-                  ? "Loading bookmarks…"
-                  : error
-                    ? "Could not load bookmarks. Retry above."
-                    : "No bookmarks here yet. Save a link to get started."
-              }}</text></list-item
-            >
-            <list-item
-              v-for="bookmark in bookmarks"
-              :key="bookmark.id"
-              v-bind="{ 'item-key': bookmark.id }"
-            >
-              <view class="card">
-                <text
-                  class="card-title"
-                  accessibility-element
-                  accessibility-traits="button"
-                  @tap="showDetail(bookmark.id)"
-                  >{{ bookmark.title || bookmark.url }}</text
-                >
-                <text class="muted" :maxline="1">{{ bookmark.siteName || bookmark.url }}</text>
-                <text v-if="bookmark.description" class="body" :maxline="3">{{
-                  bookmark.description
-                }}</text>
-                <text class="muted"
-                  >{{ bookmark.status
-                  }}{{
-                    bookmark.tags.length
-                      ? ` · ${bookmark.tags.map((tag) => "#" + tag.name).join(" ")}`
-                      : ""
-                  }}</text
-                >
-                <view class="row"
-                  ><Action
-                    label="Details"
-                    :disabled="busy"
-                    @press="showDetail(bookmark.id)" /><Action
-                    label="Open"
-                    :disabled="busy"
-                    @press="open(bookmark.url)" /><Action
-                    label="Delete"
-                    danger
-                    :disabled="busy"
-                    @press="deleteBookmark(bookmark.id)"
-                /></view>
-              </view>
-            </list-item>
-            <list-item key="more" v-bind="{ 'item-key': 'more' }"
-              ><view class="toolbar"
-                ><Action
-                  v-if="bookmarks.length < total"
-                  :label="loading ? 'Loading…' : 'Load more'"
-                  :disabled="loading || busy"
-                  @press="load(true)"
-                /><text v-else-if="bookmarks.length" class="muted">All caught up.</text></view
-              ></list-item
-            >
-          </list>
-        </refresh>
+          <view v-for="bookmark in bookmarks" :key="bookmark.id">
+            <view class="card">
+              <text
+                class="card-title"
+                accessibility-element
+                accessibility-traits="button"
+                @tap="showDetail(bookmark.id)"
+                >{{ bookmark.title || bookmark.url }}</text
+              >
+              <text class="muted" :maxline="1">{{ bookmark.siteName || bookmark.url }}</text>
+              <text v-if="bookmark.description" class="body" :maxline="3">{{
+                bookmark.description
+              }}</text>
+              <text class="muted"
+                >{{ bookmark.status
+                }}{{
+                  bookmark.tags.length
+                    ? ` · ${bookmark.tags.map((tag) => "#" + tag.name).join(" ")}`
+                    : ""
+                }}</text
+              >
+              <view class="row"
+                ><Action label="Details" :disabled="busy" @press="showDetail(bookmark.id)" /><Action
+                  label="Open"
+                  :disabled="busy"
+                  @press="open(bookmark.url)" /><Action
+                  label="Delete"
+                  danger
+                  :disabled="busy"
+                  @press="deleteBookmark(bookmark.id)"
+              /></view>
+            </view>
+          </view>
+          <view
+            ><view class="toolbar"
+              ><Action
+                v-if="bookmarks.length < total"
+                :label="loading ? 'Loading…' : 'Load more'"
+                :disabled="loading || busy"
+                @press="load(true)"
+              /><text v-else-if="bookmarks.length" class="muted">All caught up.</text></view
+            ></view
+          >
+        </scroll-view>
       </view>
 
       <scroll-view v-else class="content" scroll-orientation="vertical">
@@ -629,7 +651,10 @@ onMounted(async () => {
             <Field label="Link URL" :value="url" placeholder="https://…" @change="url = $event" />
             <text class="subtitle">Choose lists</text>
             <text class="muted">Select any number of lists, or leave all unselected.</text>
-            <text v-if="!lists.length" class="muted"
+            <text v-if="listsLoading" class="muted">{{
+              lists.length ? "Updating lists…" : "Loading lists…"
+            }}</text>
+            <text v-if="!listsLoading && !lists.length" class="muted"
               >No lists yet. You can save without a list.</text
             >
             <Action
@@ -813,12 +838,6 @@ onMounted(async () => {
   flex: 1;
   min-height: 0;
   width: 100%;
-}
-.refresh-header {
-  height: 50px;
-  width: 100%;
-  justify-content: center;
-  align-items: center;
 }
 .card {
   margin: 8px 18px;
