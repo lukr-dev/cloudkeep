@@ -97,7 +97,6 @@ function start(pendingUrl = "https://shared.example", colorScheme?: string) {
     allFilters: () => Promise<void>;
     clearFilters: () => Promise<void>;
     selectList: (id: string) => Promise<void>;
-    selectTag: (name: string) => Promise<void>;
     search: (value: string) => void;
   };
   void mounted();
@@ -232,16 +231,12 @@ it("dismisses confirmation and rename before navigating back from Lists", async 
   expect(app.screen.value).toBe("bookmarks");
 });
 
-it("toggles filters independently, keeps search for All, and re-searches when cleared", async () => {
+it("toggles the list filter, keeps search for All, and re-searches when cleared", async () => {
   const { app, api } = start("");
   await tick();
   app.q.value = "reading";
   await app.selectList(cached.id);
-  await app.selectTag("design");
   expect(app.listFilter.value).toBe(cached.id);
-  expect(app.tagFilter.value).toBe("design");
-  await app.selectTag("design");
-  expect(app.tagFilter.value).toBe("");
   await app.selectList(cached.id);
   expect(app.listFilter.value).toBe("");
   app.listFilter.value = cached.id;

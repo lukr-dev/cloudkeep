@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { BookmarkItem, List, Tag } from "../api.ts";
+import type { BookmarkItem, List } from "../api.ts";
 import Field from "../Field.vue";
 import Button from "../components/Button.vue";
 import Chip from "../components/Chip.vue";
@@ -9,7 +9,6 @@ import EmptyState from "../components/EmptyState.vue";
 defineProps<{
   bookmarks: BookmarkItem[];
   lists: List[];
-  tags: Tag[];
   total: number;
   query: string;
   listFilter: string;
@@ -22,7 +21,6 @@ defineEmits<{
   query: [value: string];
   search: [];
   list: [id: string];
-  tag: [name: string];
   clear: [];
   all: [];
   more: [];
@@ -64,13 +62,7 @@ defineEmits<{
             :label="list.name"
             :selected="listFilter === list.id"
             :disabled="busy"
-            @press="$emit('list', list.id)" /><Chip
-            v-for="tag in tags"
-            :key="tag.id"
-            :label="`#${tag.name}`"
-            :selected="tagFilter === tag.name"
-            :disabled="busy"
-            @press="$emit('tag', tag.name)" /></view></scroll-view
+            @press="$emit('list', list.id)" /></view></scroll-view
       ><text class="meta feed-meta"
         >{{ total }} links{{
           listFilter ? ` · ${lists.find((list) => list.id === listFilter)?.name || "List"}` : ""

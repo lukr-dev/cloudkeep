@@ -440,10 +440,6 @@ async function allFilters() {
 async function selectList(id: string) {
   await filterList(listFilter.value === id ? "" : id);
 }
-async function selectTag(name: string) {
-  tagFilter.value = tagFilter.value === name ? "" : name;
-  await load();
-}
 const shareEvents = lynx.getJSModule("GlobalEventEmitter");
 function receiveShare(value: unknown) {
   if (typeof value !== "string" || !value) return;
@@ -571,7 +567,6 @@ onUnmounted(() => {
         v-else-if="screen === 'bookmarks'"
         :bookmarks="bookmarks"
         :lists="lists"
-        :tags="tags"
         :total="total"
         :query="q"
         :list-filter="listFilter"
@@ -582,7 +577,6 @@ onUnmounted(() => {
         @query="search"
         @search="load()"
         @list="selectList"
-        @tag="selectTag"
         @clear="clearFilters"
         @all="allFilters"
         @more="load(true)"
