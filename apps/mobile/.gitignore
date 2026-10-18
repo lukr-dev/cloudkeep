@@ -2,6 +2,6 @@ android/.gradle/
 android/.kotlin/
 android/**/build/
 android/local.properties
-android/app/src/main/assets/
+android/app/src/main/assets/*.bundle
 *.keystore
 *.jks

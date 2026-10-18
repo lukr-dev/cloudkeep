@@ -72,6 +72,7 @@ dependencies {
     implementation("org.lynxsdk.lynx:xelement:$lynx")
     implementation("org.lynxsdk.lynx:xelement-input:$lynx")
     implementation("org.lynxsdk.lynx:xelement-refresh:$lynx")
+    implementation("org.lynxsdk.lynx:xelement-svg:$lynx")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("androidx.core:core:1.7.0")
     implementation("com.facebook.fresco:fresco:2.3.0")
