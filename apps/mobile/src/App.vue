@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
 import {
   api,
   allItems,
@@ -12,8 +12,18 @@ import {
   type Tag,
 } from "./api.ts";
 import { native, hasNativeHost, openUrl, type NativeState } from "./native.ts";
-import Action from "./Action.vue";
-import Field from "./Field.vue";
+import AppBar from "./components/AppBar.vue";
+import BottomNav from "./components/BottomNav.vue";
+import Button from "./components/Button.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
+import Snackbar from "./components/Snackbar.vue";
+import LoginScreen from "./screens/LoginScreen.vue";
+import FeedScreen from "./screens/FeedScreen.vue";
+import DetailScreen from "./screens/DetailScreen.vue";
+import ListsScreen from "./screens/ListsScreen.vue";
+import AddScreen from "./screens/AddScreen.vue";
+import ShareScreen from "./screens/ShareScreen.vue";
+import SettingsScreen from "./screens/SettingsScreen.vue";
 
 type Screen = "bookmarks" | "detail" | "lists" | "add" | "settings";
 const screen = ref<Screen>("bookmarks");
@@ -25,6 +35,10 @@ const state = ref<NativeState>({
   pendingUrl: "",
   lists: [],
 });
+const dark = ref(
+  (lynx.__globalProps as { colorScheme?: string } | undefined)?.colorScheme === "dark",
+);
+provide("dark", dark);
 const ready = ref(false);
 const email = ref("");
 const password = ref("");
@@ -50,6 +64,7 @@ const url = ref("");
 const selectedLists = ref<string[]>([]);
 const shared = ref(false);
 const saved = ref(false);
+const savedDuplicate = ref(false);
 const confirm = ref<{ label: string; action: () => Promise<void> }>();
 let loadVersion = 0;
 let catalogVersion = 0;
@@ -134,6 +149,7 @@ async function refresh() {
   await Promise.all([load(), catalog().catch(failure)]);
 }
 async function login() {
+  if (!email.value || !password.value) return;
   await run(async () => {
     try {
       await signIn(server.value, email.value, password.value);
@@ -167,13 +183,13 @@ async function navigate(next: Screen) {
   error.value = "";
   notice.value = "";
   confirm.value = undefined;
-  if (next === "bookmarks") await load();
-  if (next === "lists" || next === "settings" || next === "add") await run(catalog);
   if (next === "add") {
     url.value = "";
     selectedLists.value = [];
     saved.value = false;
   }
+  if (next === "bookmarks") await load();
+  if (next === "lists" || next === "settings" || next === "add") await run(catalog);
 }
 function toggleList(id: string) {
   if (busy.value) return;
@@ -188,6 +204,7 @@ async function save() {
       "POST",
       { url: url.value.trim(), listIds: selectedLists.value },
     );
+    savedDuplicate.value = result.alreadyExists;
     notice.value = result.alreadyExists ? "Already saved. Moved to the top." : "Saved to CloudKeep";
     if (shared.value) await native("clearPendingSharedUrl");
     saved.value = true;
@@ -228,6 +245,7 @@ async function detailList(id: string) {
   });
 }
 async function addTag() {
+  if (!tagName.value.trim()) return;
   await run(async () => {
     const result = await api<{ tag: BookmarkDetail["tags"][number] }>(
       `/api/bookmarks/${detail.value!.id}/tags`,
@@ -260,6 +278,7 @@ function deleteBookmark(id: string) {
   };
 }
 async function saveList() {
+  if (!newListName.value.trim()) return;
   await run(async () => {
     await api(
       editingList.value ? `/api/lists/${editingList.value}` : "/api/lists",
@@ -346,6 +365,85 @@ async function open(url: string) {
   });
 }
 
+const showNav = computed(
+  () =>
+    ready.value &&
+    !!state.value.token &&
+    !shared.value &&
+    ["bookmarks", "lists", "settings"].includes(screen.value),
+);
+const feedEmpty = computed(
+  () => !shared.value && screen.value === "bookmarks" && !bookmarks.value.length,
+);
+const title = computed(() =>
+  shared.value
+    ? "Save to CloudKeep"
+    : {
+        bookmarks: "Bookmarks",
+        detail: "Bookmark",
+        lists: "Lists",
+        add: "Add bookmark",
+        settings: "Settings",
+      }[screen.value],
+);
+const canGoBack = computed(
+  () =>
+    shared.value ||
+    !!confirm.value ||
+    filterPanel.value ||
+    (screen.value === "lists" && !!editingList.value) ||
+    (!!state.value.token && screen.value !== "bookmarks"),
+);
+watch(canGoBack, (enabled) => {
+  void native("setBackHandler", { enabled });
+});
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+watch(notice, (value) => {
+  clearTimeout(noticeTimer);
+  if (value)
+    noticeTimer = setTimeout(() => {
+      notice.value = "";
+    }, 3000);
+});
+function cancelRename() {
+  editingList.value = "";
+  newListName.value = "";
+}
+function editList(list: List) {
+  editingList.value = list.id;
+  newListName.value = list.name;
+}
+async function back() {
+  if (busy.value) return;
+  if (confirm.value) confirm.value = undefined;
+  else if (shared.value) await endShare(true);
+  else if (filterPanel.value) filterPanel.value = false;
+  else if (screen.value === "lists" && editingList.value) cancelRename();
+  else if (screen.value !== "bookmarks") await navigate("bookmarks");
+}
+function receiveTheme(value: unknown) {
+  if (value === "light" || value === "dark") dark.value = value === "dark";
+}
+function search(value: string) {
+  q.value = value;
+  if (!value) void load();
+}
+async function clearFilters() {
+  q.value = "";
+  await allFilters();
+}
+async function allFilters() {
+  listFilter.value = "";
+  tagFilter.value = "";
+  await load();
+}
+async function selectList(id: string) {
+  await filterList(listFilter.value === id ? "" : id);
+}
+async function selectTag(name: string) {
+  tagFilter.value = tagFilter.value === name ? "" : name;
+  await load();
+}
 const shareEvents = lynx.getJSModule("GlobalEventEmitter");
 function receiveShare(value: unknown) {
   if (typeof value !== "string" || !value) return;
@@ -356,6 +454,8 @@ function receiveShare(value: unknown) {
 onMounted(async () => {
   // Register before reading state; the native handshake replays shares received during startup.
   shareEvents.addListener("cloudkeepShare", receiveShare);
+  shareEvents.addListener("cloudkeepTheme", receiveTheme);
+  shareEvents.addListener("cloudkeepBack", back);
   try {
     state.value = await native<NativeState>("getState");
     server.value = state.value.server;
@@ -375,514 +475,804 @@ onMounted(async () => {
     ready.value = true;
   }
 });
-onUnmounted(() => shareEvents.removeListener("cloudkeepShare", receiveShare));
+onUnmounted(() => {
+  shareEvents.removeListener("cloudkeepShare", receiveShare);
+  shareEvents.removeListener("cloudkeepTheme", receiveTheme);
+  shareEvents.removeListener("cloudkeepBack", back);
+  clearTimeout(noticeTimer);
+});
 </script>
 
 <template>
-  <view class="app">
-    <view class="header"
-      ><text class="brand">CloudKeep</text><text class="hint">Your links, kept close.</text></view
+  <view class="app" :class="{ dark }">
+    <AppBar
+      v-if="ready && state.token"
+      :title="title"
+      :back="screen === 'detail'"
+      :close="shared || screen === 'add'"
+      :disabled="busy"
+      @back="back"
     >
-    <text v-if="!ready" class="status">Opening CloudKeep…</text>
-    <text v-if="!hasNativeHost" class="dev-note"
-      >Explorer preview · credentials last only for this session. Native sharing and browser actions
-      require the APK.</text
-    >
-    <view v-if="error" class="alert" accessibility-element accessibility-live-region="assertive"
-      ><text class="error">{{ error }}</text
-      ><Action v-if="state.token" label="Retry refresh" :disabled="busy" @press="run(refresh)"
-    /></view>
-    <text v-if="notice" class="notice" accessibility-live-region="polite">{{ notice }}</text>
-    <view v-if="confirm" class="alert"
-      ><text class="body">{{ confirm.label }}</text
-      ><Action label="Delete" danger :disabled="busy" @press="confirmDelete" /><Action
-        label="Cancel"
-        @press="confirm = undefined"
-    /></view>
-
-    <scroll-view v-if="ready && !state.token" class="content" scroll-orientation="vertical">
-      <text class="title">Sign in</text>
-      <text class="muted">{{
-        shared
-          ? "Sign in to save your shared link. It will be waiting here."
-          : "Connect to your CloudKeep server."
-      }}</text>
-      <Field label="Server URL" :value="server" @change="server = $event" />
-      <Field label="Email" :value="email" :max-length="254" @change="email = $event" />
-      <Field
-        label="Password"
-        :value="password"
-        password
-        :max-length="128"
-        @change="password = $event"
+      <Button
+        v-if="screen === 'bookmarks' && !shared"
+        label="Refresh bookmarks"
+        icon="refresh"
+        icon-only
+        quiet
+        :disabled="loading || busy"
+        @press="run(refresh)"
       />
-      <Action
-        :label="busy ? 'Signing in…' : 'Sign in'"
-        primary
-        :disabled="busy || !email || !password"
-        @press="login"
-      />
-      <Action v-if="shared" label="Cancel and return" :disabled="busy" @press="endShare(true)" />
-    </scroll-view>
-
+      <template v-if="screen === 'detail' && detail && !shared"
+        ><Button
+          label="Open in browser"
+          icon="external"
+          icon-only
+          quiet
+          :disabled="busy"
+          @press="open(detail.url)" /><Button
+          label="Delete bookmark"
+          icon="trash"
+          icon-only
+          quiet
+          danger
+          :disabled="busy"
+          @press="deleteBookmark(detail.id)"
+      /></template>
+    </AppBar>
+    <view
+      v-if="error && !(feedEmpty && state.token)"
+      class="error-banner"
+      accessibility-live-region="assertive"
+      ><text class="error-message">{{ error }}</text
+      ><Button
+        v-if="state.token"
+        label="Retry"
+        quiet
+        danger
+        :disabled="busy || loading"
+        @press="run(refresh)" /><Button
+        label="Dismiss error"
+        icon="close"
+        icon-only
+        quiet
+        danger
+        @press="error = ''"
+    /></view>
+    <LoginScreen
+      v-if="ready && !state.token"
+      :server="server"
+      :email="email"
+      :password="password"
+      :busy="busy"
+      :shared="shared"
+      :native-host="hasNativeHost"
+      @server="server = $event"
+      @email="email = $event"
+      @password="password = $event"
+      @login="login"
+      @cancel="endShare(true)"
+    />
     <view v-if="ready && state.token" class="workspace">
-      <view v-if="!shared" class="nav">
-        <Action
-          label="Bookmarks"
-          :primary="screen === 'bookmarks'"
-          :disabled="busy"
-          @press="navigate('bookmarks')"
-        />
-        <Action
-          label="Lists"
-          :primary="screen === 'lists'"
-          :disabled="busy"
-          @press="navigate('lists')"
-        />
-        <Action label="Add" :primary="screen === 'add'" :disabled="busy" @press="navigate('add')" />
-        <Action
-          label="Settings"
-          :primary="screen === 'settings'"
-          :disabled="busy"
-          @press="navigate('settings')"
-        />
-      </view>
-
-      <view v-if="screen === 'bookmarks'" class="workspace">
-        <view class="toolbar">
-          <text class="title">Bookmarks</text>
-          <Field
-            label="Search bookmarks"
-            :value="q"
-            placeholder="Title, description or URL"
-            :max-length="200"
-            @change="q = $event"
-          />
-          <view class="row"
-            ><Action label="Search" :disabled="busy" @press="load()" /><Action
-              :label="filterPanel ? 'Hide filters' : 'Lists & tags'"
-              @press="filterPanel = !filterPanel" /><Action
-              label="Refresh"
-              :disabled="loading || busy"
-              @press="run(refresh)"
-          /></view>
-          <text class="muted"
-            >{{ total }} links{{ listFilter ? " · list filtered" : ""
-            }}{{ tagFilter ? ` · #${tagFilter}` : "" }}</text
-          >
-        </view>
-        <scroll-view v-if="filterPanel" class="filter-panel" scroll-orientation="vertical">
-          <Action label="All lists" :primary="!listFilter" @press="filterList('')" />
-          <Action
-            v-for="list in lists"
-            :key="list.id"
-            :label="list.name"
-            :primary="listFilter === list.id"
-            @press="filterList(list.id)"
-          />
-          <text class="subtitle">Tags</text>
-          <Action
-            label="All tags"
-            :primary="!tagFilter"
-            @press="
-              tagFilter = '';
-              filterPanel = false;
-              load();
-            "
-          />
-          <Action
-            v-for="tag in tags"
-            :key="tag.id"
-            :label="`#${tag.name}`"
-            :primary="tagFilter === tag.name"
-            @press="
-              tagFilter = tag.name;
-              filterPanel = false;
-              load();
-            "
-          />
-        </scroll-view>
-        <!-- shortcut: ordinary rows avoid Vue Lynx 0.5.1's append-only list adapter;
-             restore virtualization/pull-to-refresh after its dynamic list support is fixed. -->
-        <scroll-view v-else class="feed" scroll-orientation="vertical">
-          <view v-if="!bookmarks.length"
-            ><text class="status">{{
-              loading
-                ? "Loading bookmarks…"
-                : error
-                  ? "Could not load bookmarks. Retry above."
-                  : "No bookmarks here yet. Save a link to get started."
-            }}</text></view
-          >
-          <view v-for="bookmark in bookmarks" :key="bookmark.id">
-            <view class="card">
-              <text
-                class="card-title"
-                accessibility-element
-                accessibility-traits="button"
-                @tap="showDetail(bookmark.id)"
-                >{{ bookmark.title || bookmark.url }}</text
-              >
-              <text class="muted" :maxline="1">{{ bookmark.siteName || bookmark.url }}</text>
-              <text v-if="bookmark.description" class="body" :maxline="3">{{
-                bookmark.description
-              }}</text>
-              <text class="muted"
-                >{{ bookmark.status
-                }}{{
-                  bookmark.tags.length
-                    ? ` · ${bookmark.tags.map((tag) => "#" + tag.name).join(" ")}`
-                    : ""
-                }}</text
-              >
-              <view class="row"
-                ><Action label="Details" :disabled="busy" @press="showDetail(bookmark.id)" /><Action
-                  label="Open"
-                  :disabled="busy"
-                  @press="open(bookmark.url)" /><Action
-                  label="Delete"
-                  danger
-                  :disabled="busy"
-                  @press="deleteBookmark(bookmark.id)"
-              /></view>
-            </view>
-          </view>
-          <view
-            ><view class="toolbar"
-              ><Action
-                v-if="bookmarks.length < total"
-                :label="loading ? 'Loading…' : 'Load more'"
-                :disabled="loading || busy"
-                @press="load(true)"
-              /><text v-else-if="bookmarks.length" class="muted">All caught up.</text></view
-            ></view
-          >
-        </scroll-view>
-      </view>
-
-      <scroll-view v-else class="content" scroll-orientation="vertical">
-        <view v-if="screen === 'detail' && detail">
-          <Action label="Back to bookmarks" :disabled="busy" @press="navigate('bookmarks')" />
-          <text class="title">{{ detail.title || detail.url }}</text>
-          <image
-            v-if="detail.imageUrl"
-            class="og-image"
-            :src="detail.imageUrl"
-            mode="aspectFill"
-            accessibility-label="Bookmark preview"
-          />
-          <text class="muted">{{ detail.url }}</text>
-          <text v-if="detail.description" class="body">{{ detail.description }}</text>
-          <text v-if="detail.summary" class="body">{{ detail.summary }}</text>
-          <text class="muted"
-            >{{ detail.status }}{{ detail.error ? ` · ${detail.error}` : "" }}</text
-          >
-          <Action label="Open in browser" primary :disabled="busy" @press="open(detail.url)" />
-          <Action label="Refresh details" :disabled="busy" @press="showDetail(detail.id)" />
-          <text class="subtitle">Tags</text>
-          <text v-if="!detail.tags.length" class="muted">No tags yet</text>
-          <Action
-            v-for="tag in detail.tags"
-            :key="tag.id"
-            :label="`#${tag.name} · Remove`"
-            :disabled="busy"
-            @press="removeTag(tag.id)"
-          />
-          <Field label="New tag" :value="tagName" :max-length="40" @change="tagName = $event" />
-          <Action label="Add tag" :disabled="busy || !tagName.trim()" @press="addTag" />
-          <text class="subtitle">Lists</text>
-          <text v-if="!lists.length" class="muted">Create a list from the Lists tab.</text>
-          <Action
-            v-for="list in lists"
-            :key="list.id"
-            :label="`${detail.listIds.includes(list.id) ? '✓ ' : '+ '}${list.name}`"
-            :primary="detail.listIds.includes(list.id)"
-            :disabled="busy"
-            @press="detailList(list.id)"
-          />
-          <Action
-            label="Delete bookmark"
-            danger
-            :disabled="busy"
-            @press="deleteBookmark(detail.id)"
-          />
-        </view>
-
-        <view v-if="screen === 'lists'">
-          <text class="title">Lists</text>
-          <Field
-            :label="editingList ? 'Rename list' : 'New list'"
-            :value="newListName"
-            :max-length="100"
-            @change="newListName = $event"
-          />
-          <Action
-            :label="editingList ? 'Save name' : 'Create list'"
-            primary
-            :disabled="busy || !newListName.trim()"
-            @press="saveList"
-          />
-          <Action
-            v-if="editingList"
-            label="Cancel rename"
-            @press="
-              editingList = '';
-              newListName = '';
-            "
-          />
-          <text v-if="!lists.length" class="muted">Lists help you keep links together.</text>
-          <view v-for="list in lists" :key="list.id" class="card">
-            <text class="card-title">{{ list.name }} · {{ list.count }}</text>
-            <view class="row"
-              ><Action label="View" :disabled="busy" @press="filterList(list.id)" /><Action
-                label="Rename"
-                :disabled="busy"
-                @press="
-                  editingList = list.id;
-                  newListName = list.name;
-                " /><Action label="Delete" danger :disabled="busy" @press="deleteList(list)"
-            /></view>
-          </view>
-        </view>
-
-        <view v-if="screen === 'add'">
-          <text class="title">{{ shared ? "Save shared link" : "Add bookmark" }}</text>
-          <view v-if="!saved">
-            <Field label="Link URL" :value="url" placeholder="https://…" @change="url = $event" />
-            <text class="subtitle">Choose lists</text>
-            <text class="muted">Select any number of lists, or leave all unselected.</text>
-            <text v-if="listsLoading" class="muted">{{
-              lists.length ? "Updating lists…" : "Loading lists…"
-            }}</text>
-            <text v-if="!listsLoading && !lists.length" class="muted"
-              >No lists yet. You can save without a list.</text
-            >
-            <Action
-              v-for="list in lists"
-              :key="list.id"
-              :label="`${selectedLists.includes(list.id) ? '✓ ' : '+ '}${list.name}`"
-              :primary="selectedLists.includes(list.id)"
-              :disabled="busy"
-              @press="toggleList(list.id)"
-            />
-            <Action
-              :label="busy ? 'Saving…' : 'Save bookmark'"
-              primary
-              :disabled="busy || !url.trim() || selectedLists.length > 30"
-              @press="save"
-            />
-            <text v-if="selectedLists.length > 30" class="error">Choose at most 30 lists.</text>
-            <Action
-              v-if="shared"
-              label="Cancel and return"
-              :disabled="busy"
-              @press="endShare(true)"
-            />
-          </view>
-          <view v-else>
-            <text class="body">Your link is saved. Metadata may take a moment to arrive.</text>
-            <Action
-              v-if="shared"
-              label="Return to previous app"
-              primary
-              :disabled="busy"
-              @press="endShare(true)"
-            />
-            <Action
-              :label="shared ? 'Stay in CloudKeep' : 'View bookmarks'"
-              :disabled="busy"
-              @press="shared ? endShare(false) : navigate('bookmarks')"
-            />
-            <Action v-if="!shared" label="Save another link" @press="navigate('add')" />
-          </view>
-        </view>
-
-        <view v-if="screen === 'settings'">
-          <text class="title">Settings</text>
-          <text class="subtitle">Server</text><text class="body">{{ state.server }}</text>
-          <text class="muted"
-            >To change servers or accounts, sign out and enter the new server on the sign-in
-            screen.</text
-          >
-          <text class="subtitle">When sharing a link</text>
-          <Action
-            label="Ask · choose lists before saving"
-            :primary="state.shareMode === 'ask'"
-            :disabled="busy"
-            @press="shareMode('ask')"
-          />
-          <Action
-            label="Quick save · save and return immediately"
-            :primary="state.shareMode === 'quick'"
-            :disabled="busy"
-            @press="shareMode('quick')"
-          />
-          <text class="muted"
-            >Quick save runs natively without opening the full app. If it fails, CloudKeep opens the
-            list picker so you can retry.</text
-          >
-          <text class="subtitle">Quick save default list</text>
-          <Action
-            label="No list"
-            :primary="!state.defaultList"
-            :disabled="busy"
-            @press="defaultList('')"
-          />
-          <Action
-            v-for="list in lists"
-            :key="list.id"
-            :label="list.name"
-            :primary="state.defaultList === list.id"
-            :disabled="busy"
-            @press="defaultList(list.id)"
-          />
-          <text
-            v-if="state.defaultList && !lists.some((list) => list.id === state.defaultList)"
-            class="error"
-            >Your default list was deleted. Choose another list or “No list”.</text
-          >
-          <text class="subtitle">Advanced settings</text>
-          <Action
-            label="Manage AI, prompts and invites on web"
-            :disabled="busy"
-            @press="open(state.server + '/settings')"
-          />
-          <Action label="Sign out" danger :disabled="busy" @press="logout" />
-        </view>
-      </scroll-view>
+      <ShareScreen
+        v-if="shared"
+        :url="url"
+        :lists="lists"
+        :selected="selectedLists"
+        :loading="listsLoading"
+        :busy="busy"
+        :saved="saved"
+        :duplicate="savedDuplicate"
+        @toggle="toggleList"
+        @save="save"
+        @cancel="endShare(true)"
+        @stay="endShare(false)"
+      />
+      <FeedScreen
+        v-else-if="screen === 'bookmarks'"
+        :bookmarks="bookmarks"
+        :lists="lists"
+        :tags="tags"
+        :total="total"
+        :query="q"
+        :list-filter="listFilter"
+        :tag-filter="tagFilter"
+        :loading="loading"
+        :busy="busy"
+        :error="error"
+        @query="search"
+        @search="load()"
+        @list="selectList"
+        @tag="selectTag"
+        @clear="clearFilters"
+        @all="allFilters"
+        @more="load(true)"
+        @detail="showDetail"
+        @add="navigate('add')"
+        @retry="run(refresh)"
+      />
+      <DetailScreen
+        v-else-if="screen === 'detail' && detail"
+        :bookmark="detail"
+        :lists="lists"
+        :tag-name="tagName"
+        :busy="busy"
+        @open="open(detail.url)"
+        @refresh="showDetail(detail.id)"
+        @tag-name="tagName = $event"
+        @add-tag="addTag"
+        @remove-tag="removeTag"
+        @list="detailList"
+      />
+      <ListsScreen
+        v-else-if="screen === 'lists'"
+        :lists="lists"
+        :name="newListName"
+        :editing="!!editingList"
+        :busy="busy"
+        @name="newListName = $event"
+        @save="saveList"
+        @cancel="cancelRename"
+        @view="filterList"
+        @edit="editList"
+        @delete="deleteList"
+      />
+      <AddScreen
+        v-else-if="screen === 'add'"
+        :url="url"
+        :lists="lists"
+        :selected="selectedLists"
+        :loading="listsLoading"
+        :busy="busy"
+        :saved="saved"
+        :duplicate="savedDuplicate"
+        @url="url = $event"
+        @toggle="toggleList"
+        @save="save"
+        @view="navigate('bookmarks')"
+        @another="navigate('add')"
+      />
+      <SettingsScreen
+        v-else-if="screen === 'settings'"
+        :state="state"
+        :lists="lists"
+        :busy="busy"
+        @mode="shareMode"
+        @default-list="defaultList"
+        @logout="logout"
+        @more="open(state.server + '/settings')"
+      />
     </view>
+    <BottomNav v-if="showNav" :active="screen" :disabled="busy" @navigate="navigate" />
+    <Snackbar v-if="notice" :message="notice" :nav="showNav" />
+    <ConfirmDialog
+      v-if="confirm"
+      :message="confirm.label"
+      :busy="busy"
+      @cancel="confirm = undefined"
+      @confirm="confirmDelete"
+    />
   </view>
 </template>
-
 <style>
+@font-face {
+  font-family: "Geist";
+  src: url("asset:///fonts/Geist-Regular.ttf");
+}
+@font-face {
+  font-family: "GeistMedium";
+  src: url("asset:///fonts/Geist-Medium.ttf");
+}
+@font-face {
+  font-family: "GeistSemiBold";
+  src: url("asset:///fonts/Geist-SemiBold.ttf");
+}
 .app {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --subtle: #f4f4f5;
+  --text: #18181b;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: #e8e8ea;
+  --line-strong: #d4d4d8;
+  --ink: #18181b;
+  --on-ink: #fafafa;
+  --accent: #1f7a5a;
+  --accent-soft: #e7f3ee;
+  --danger: #b4372f;
+  --danger-soft: #fbeceb;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: #fafafa;
+  background-color: var(--bg);
+  position: relative;
 }
-.header {
-  padding: 16px 18px 12px;
-  border-bottom: 1px solid #e4e4e7;
+.app.dark {
+  --bg: #111113;
+  --surface: #18181b;
+  --subtle: #1d1d21;
+  --text: #ececee;
+  --muted: #9a9aa3;
+  --faint: #6b6b74;
+  --line: #26262b;
+  --line-strong: #34343a;
+  --ink: #ececee;
+  --on-ink: #18181b;
+  --accent: #6cc4a0;
+  --accent-soft: #17302a;
+  --danger: #f1857c;
+  --danger-soft: #3a1c1a;
 }
-.brand {
-  font-size: 22px;
-  font-weight: 700;
-  color: #18181b;
-}
-.hint {
-  font-size: 12px;
-  color: #71717a;
-  margin-top: 3px;
+text {
+  font-family: Geist, sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--text);
 }
 .workspace {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
-.nav {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-around;
-  padding: 8px 6px 0;
-  border-bottom: 1px solid #e4e4e7;
-}
-.content {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  padding: 18px;
-}
-.toolbar {
-  padding: 12px 18px 0;
-}
-.title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #18181b;
-  margin-bottom: 16px;
-}
-.subtitle {
-  font-size: 17px;
-  font-weight: 600;
-  color: #27272a;
-  margin-top: 18px;
-  margin-bottom: 12px;
-}
-.body {
-  color: #3f3f46;
-  font-size: 15px;
-  line-height: 22px;
-  margin-bottom: 12px;
-}
-.muted {
-  color: #71717a;
-  font-size: 13px;
-  line-height: 19px;
-  margin-bottom: 12px;
-}
-.status {
-  padding: 24px 18px;
-  color: #71717a;
-  font-size: 15px;
-}
-.row {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: space-between;
-}
+.content,
 .feed {
   flex: 1;
   min-height: 0;
   width: 100%;
 }
-.card {
-  margin: 8px 18px;
-  padding: 16px;
-  border: 1px solid #e4e4e7;
-  border-radius: 10px;
-  background-color: #fff;
+.page {
+  padding: 16px 16px 24px;
 }
-.card-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #18181b;
-  line-height: 24px;
-  margin-bottom: 8px;
+.grow {
+  flex: 1;
+  min-width: 0;
 }
-.alert {
-  margin: 8px 18px;
-  padding: 12px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background-color: #fef2f2;
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
 }
-.error {
+.wrap {
+  flex-wrap: wrap;
+}
+.body {
+  font-size: 15px;
+  line-height: 22px;
+}
+.medium {
+  font-family: GeistMedium, sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+}
+.muted,
+.meta,
+.source-name {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+.muted {
   font-size: 14px;
-  color: #b91c1c;
-  margin-bottom: 8px;
+  line-height: 21px;
 }
-.notice {
-  padding: 10px 18px;
-  font-size: 14px;
-  color: #15803d;
-}
-.dev-note {
-  padding: 8px 18px;
+.caption {
   font-size: 12px;
-  color: #92400e;
+  line-height: 18px;
+  color: var(--muted);
 }
-.og-image {
+.accent-text {
+  color: var(--accent);
+}
+.danger-text {
+  color: var(--danger);
+}
+.on-ink {
+  color: var(--on-ink);
+}
+.centered {
+  text-align: center;
+}
+.spaced {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.section-title {
+  font-family: GeistSemiBold, sans-serif;
+  font-size: 17px;
+  line-height: 24px;
+}
+.section-space {
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+.section-heading {
+  margin-top: 24px;
+  margin-bottom: 12px;
+  justify-content: space-between;
+}
+.group-caption {
+  font-family: GeistMedium, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+.app-bar {
+  height: 56px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.screen-title {
+  flex: 1;
+  min-width: 0;
+  font-family: GeistSemiBold, sans-serif;
+  font-size: 22px;
+  line-height: 28px;
+  letter-spacing: -0.4px;
+  margin-left: 8px;
+}
+.icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.button {
+  min-height: 48px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background-color: var(--surface);
+}
+.button-label {
+  font-family: GeistMedium, sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: center;
+}
+.button.primary {
+  background-color: var(--ink);
+  border-color: var(--ink);
+}
+.button.danger {
+  border-color: var(--danger);
+}
+.button.quiet {
+  border-color: transparent;
+  background-color: transparent;
+}
+.button.icon-button {
+  width: 48px;
+  height: 48px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+.disabled {
+  opacity: 0.45;
+}
+/* Bottom bars use --bg: the native container paints the gesture area below them in the same colour. */
+.bottom-nav {
+  height: 64px;
+  flex-shrink: 0;
+  background-color: var(--bg);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: row;
+  padding: 4px 8px;
+}
+.nav-tab {
+  flex: 1;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.nav-pill {
+  width: 64px;
+  height: 30px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.selected {
+  background-color: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+.nav-label {
+  font-family: GeistMedium, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.nav-label.accent-text {
+  color: var(--accent);
+}
+.fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feed-tools {
+  padding: 8px 16px 0;
+}
+.search-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.search-row .field {
+  margin-bottom: 0;
+}
+.chip-scroll {
+  width: 100%;
+  height: 56px;
+}
+.chips {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.chip-hit {
+  min-height: 48px;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chip {
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background-color: var(--surface);
+}
+.chip.selected {
+  background-color: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+.chip-label {
+  font-family: GeistMedium, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+}
+.chip-label.accent-text {
+  color: var(--accent);
+}
+.feed-meta {
+  margin-bottom: 12px;
+}
+.bookmark-card {
+  margin: 0 16px 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: var(--surface);
+}
+.thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background-color: var(--subtle);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thumb-image {
+  width: 72px;
+  height: 72px;
+}
+.letter {
+  font-family: GeistMedium, sans-serif;
+  font-size: 24px;
+  color: var(--faint);
+}
+.bookmark-body {
+  flex: 1;
+  min-width: 0;
+}
+.source-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.source-name {
+  flex-shrink: 1;
+}
+.favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.favicon-letter {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background-color: var(--subtle);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+.bookmark-title {
+  font-family: GeistSemiBold, sans-serif;
+  font-size: 15px;
+  line-height: 21px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.tag-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+.tag-label {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  background-color: var(--subtle);
+  border-radius: 4px;
+  padding: 1px 4px;
+  max-width: 90px;
+  flex-shrink: 1;
+}
+.feed-footer {
+  padding: 12px 16px 88px;
+}
+.skeleton {
+  height: 12px;
+  margin: 4px 0 10px;
+  background-color: var(--subtle);
+  border-radius: 4px;
+}
+.skeleton.short {
+  width: 55%;
+}
+.empty-state {
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background-color: var(--subtle);
+}
+.hero-image {
   width: 100%;
   height: 190px;
-  border-radius: 8px;
+  border-radius: 12px;
   margin-bottom: 16px;
 }
-.filter-panel {
+.detail-title {
+  font-family: GeistSemiBold, sans-serif;
+  font-size: 20px;
+  line-height: 28px;
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+.summary {
+  padding: 16px;
+  border-radius: 8px;
+  background-color: var(--subtle);
+  margin: 16px 0;
+}
+.summary-label {
+  font-family: GeistMedium, sans-serif;
+  margin-bottom: 8px;
+}
+.input-row {
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.input-row .field {
+  margin-bottom: 0;
+}
+.surface-card {
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.choice-row {
+  min-height: 52px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.choice {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.choice.checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.choice.radio {
+  border-radius: 12px;
+}
+.choice.radio.checked {
+  background-color: transparent;
+}
+.radio-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 8px;
+  background-color: var(--accent);
+}
+.list-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 4px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.list-body {
   flex: 1;
-  padding: 12px 18px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.bottom-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: var(--bg);
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.link-preview {
+  padding: 16px;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+.saved-state {
+  padding: 48px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.success-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
+  background-color: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+}
+.settings-server {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.login {
+  padding: 48px 24px 24px;
+}
+.login-brand {
+  padding: 24px 0 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.wordmark {
+  font-family: GeistSemiBold, sans-serif;
+  font-size: 26px;
+  line-height: 32px;
+  letter-spacing: -0.5px;
+}
+.login .button {
+  margin-bottom: 12px;
+}
+.dev-note {
+  text-align: center;
+  margin-top: 24px;
+}
+.error-banner {
+  margin: 8px 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background-color: var(--danger-soft);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.error-message {
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  font-size: 14px;
+  line-height: 21px;
+}
+.snackbar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 88px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background-color: var(--ink);
+}
+.snackbar.above-nav {
+  bottom: 140px;
+}
+.snackbar-text {
+  color: var(--on-ink);
+  font-size: 14px;
+  line-height: 20px;
+}
+.dialog-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.dialog {
+  width: 100%;
+  padding: 24px;
+  background-color: var(--surface);
+  border-radius: 12px;
+}
+.dialog-actions {
+  margin-top: 24px;
+  justify-content: flex-end;
 }
 </style>
