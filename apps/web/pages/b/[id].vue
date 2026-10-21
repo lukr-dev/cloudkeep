@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { Link, useParams, useRouter } from "@void/vue";
 import { allItems, api, message, type BookmarkDetail, type List } from "../../lib/api.ts";
+import { useFeatures } from "../../composables/session.ts";
 import { useTask } from "../../composables/task.ts";
 import Icon from "../../components/Icon.vue";
 import { usePolling } from "../../composables/polling.ts";
+const MarkdownEditor = defineAsyncComponent(() => import("../../components/MarkdownEditor.vue"));
+const features = useFeatures();
+const storageDisabled = computed(() => bookmark.value?.type === "asset" && !features.value.files);
+const text = ref("");
 const params = useParams<{ id: string }>();
 const router = useRouter();
 const bookmark = ref<BookmarkDetail | null>(null);
@@ -20,7 +25,8 @@ const dirty = computed(
   () =>
     !!bookmark.value &&
     (title.value !== (bookmark.value.title ?? "") ||
-      description.value !== (bookmark.value.description ?? "")),
+      description.value !== (bookmark.value.description ?? "") ||
+      (bookmark.value.type === "text" && text.value !== (bookmark.value.noteText ?? ""))),
 );
 const domain = computed(() => {
   try {
@@ -30,6 +36,7 @@ const domain = computed(() => {
   }
 });
 function discard() {
+  text.value = bookmark.value?.noteText ?? "";
   title.value = bookmark.value?.title ?? "";
   description.value = bookmark.value?.description ?? "";
 }
@@ -42,6 +49,8 @@ async function load(initial = false) {
     if (initial || title.value === (bookmark.value?.title ?? "")) title.value = next.title ?? "";
     if (initial || description.value === (bookmark.value?.description ?? ""))
       description.value = next.description ?? "";
+    if (initial || text.value === (bookmark.value?.noteText ?? ""))
+      text.value = next.noteText ?? "";
     bookmark.value = next;
     if (initial) lists.value = await allItems<List>("/api/lists");
   } catch (cause) {
@@ -63,7 +72,13 @@ function save() {
   return run(async () => {
     await api(path, {
       method: "PATCH",
-      body: { title: title.value || null, description: description.value || null },
+      body: {
+        title: title.value || null,
+        description: description.value || null,
+        ...(bookmark.value?.type === "text" && text.value !== bookmark.value.noteText
+          ? { text: text.value }
+          : {}),
+      },
     });
     await load();
     notice.value = "Saved";
@@ -95,7 +110,7 @@ function reprocess() {
   return run(async () => {
     try {
       await api(`${path}/reprocess`, { method: "POST", body: {} });
-      notice.value = "Fetching again. Your edits are kept.";
+      notice.value = "Processing again. Your edits are kept.";
     } finally {
       await load();
     }
@@ -122,9 +137,27 @@ function remove() {
       <div class="skeleton line"></div>
     </div>
     <template v-if="bookmark">
+      <img
+        v-if="!storageDisabled && bookmark.assetType === 'image' && bookmark.fileUrl"
+        :src="bookmark.fileUrl"
+        :alt="bookmark.assetName ?? ''"
+        class="asset-image"
+      />
+      <p v-if="storageDisabled" class="muted">File storage is disabled</p>
+      <div v-if="bookmark.hasFile && !storageDisabled" class="file-actions">
+        <span class="break">{{ bookmark.assetName }}</span>
+        <a
+          :href="bookmark.fileUrl ?? undefined"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="link"
+          >Open</a
+        >
+        <a :href="`${bookmark.fileUrl}?download=1`" class="link">Download</a>
+      </div>
       <a
         v-if="bookmark.imageUrl && !imageFailed"
-        :href="bookmark.url"
+        :href="bookmark.url ?? undefined"
         target="_blank"
         rel="noopener noreferrer"
         class="hero fade-in"
@@ -144,7 +177,11 @@ function remove() {
           class="favicon"
           referrerpolicy="no-referrer"
         />
-        <span>{{ bookmark.siteName || domain }}</span>
+        <span>{{
+          bookmark.siteName ||
+          domain ||
+          (bookmark.type === "text" ? "Note" : bookmark.assetType === "pdf" ? "PDF" : "Image")
+        }}</span>
         <span aria-hidden="true">·</span>
         <span>Saved {{ new Date(bookmark.createdAt).toLocaleDateString() }}</span>
       </div>
@@ -156,7 +193,10 @@ function remove() {
           class="title-input"
           rows="1"
           maxlength="1000"
-          :placeholder="bookmark.url"
+          :placeholder="
+            bookmark.url ??
+            (bookmark.type === 'text' ? 'Untitled note' : (bookmark.assetName ?? 'Title'))
+          "
           @keydown.enter.prevent="dirty && save()"
         />
         <label for="description" class="sr-only">Description</label>
@@ -168,19 +208,39 @@ function remove() {
           maxlength="4000"
           placeholder="Add a description"
         />
+        <MarkdownEditor v-if="bookmark.type === 'text'" v-model="text" label="Note text" />
+        <p v-if="bookmark.type === 'text'" class="small muted">
+          {{ text.length.toLocaleString() }} / 100,000 characters
+        </p>
         <div v-if="dirty" class="edit-actions fade-in">
           <button type="button" class="ghost small" :disabled="busy" @click="discard">Cancel</button
-          ><button class="primary small" :disabled="busy">Save</button>
+          ><button
+            class="primary small"
+            :disabled="
+              busy || (bookmark.type === 'text' && (!text.length || text.length > 100_000))
+            "
+          >
+            Save
+          </button>
         </div>
       </form>
-      <a :href="bookmark.url" target="_blank" rel="noopener noreferrer" class="url"
+      <a
+        v-if="bookmark.url"
+        :href="bookmark.url ?? undefined"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="url"
         ><span class="break">{{ bookmark.url }}</span
         ><Icon name="external" :size="13"
       /></a>
-      <p v-if="['pending', 'processing'].includes(bookmark.status)" class="status" role="status">
-        <span class="dot pulse"></span>Fetching details. This page updates on its own.
+      <p
+        v-if="!storageDisabled && ['pending', 'processing'].includes(bookmark.status)"
+        class="status"
+        role="status"
+      >
+        <span class="dot pulse"></span>Processing. This page updates on its own.
       </p>
-      <div v-if="bookmark.status === 'failed'" class="alert" role="alert">
+      <div v-if="bookmark.status === 'failed' && !storageDisabled" class="alert" role="alert">
         <span>{{ bookmark.error || "Couldn’t process this page." }}</span
         ><button :disabled="busy" @click="reprocess">Retry</button>
       </div>
@@ -251,6 +311,23 @@ function remove() {
   </article>
 </template>
 <style scoped>
+.asset-image {
+  display: block;
+  max-width: 100%;
+  max-height: 75vh;
+  object-fit: contain;
+  margin: 0 auto 1rem;
+  border-radius: var(--radius);
+}
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
 .detail {
   max-width: 680px;
   margin: 0 auto;

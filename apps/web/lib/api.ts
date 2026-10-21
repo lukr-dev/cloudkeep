@@ -1,3 +1,5 @@
+export type Features = { files: boolean };
+export type Me = { user: User; features: Features };
 export type User = { id: string; name: string; email: string; role: "admin" | "user" };
 export type TagLink = { id: string; name: string; source: "manual" | "ai" };
 export type Bookmark = {
@@ -116,4 +118,41 @@ export async function allItems<T>(path: "/api/lists" | "/api/tags"): Promise<T[]
 }
 export function message(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
+}
+
+export function uploadFile(
+  file: File,
+  listId: string,
+  progress: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    const query = new URLSearchParams();
+    if (listId) query.append("listId", listId);
+    request.open("POST", `/api/bookmarks/files?${query}`);
+    request.setRequestHeader("Content-Type", file.type);
+    request.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+    // The browser supplies Content-Length for the raw File body.
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) progress(Math.round((event.loaded / event.total) * 100));
+    };
+    request.onerror = () =>
+      reject(new ApiError(0, "Could not upload. Check your connection and try again."));
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+      let error = `Upload failed (${request.status}). Please try again.`;
+      try {
+        const data = JSON.parse(request.responseText);
+        if (typeof data.error === "string") error = data.error;
+      } catch {
+        /* Non-JSON error responses use the controlled fallback. */
+      }
+      if (request.status === 401) window.location.assign("/login");
+      reject(new ApiError(request.status, error));
+    };
+    request.send(file);
+  });
 }

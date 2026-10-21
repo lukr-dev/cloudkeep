@@ -13,6 +13,9 @@
   "dependencies": {
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/geist-mono": "catalog:",
+    "@tiptap/markdown": "catalog:",
+    "@tiptap/starter-kit": "catalog:",
+    "@tiptap/vue-3": "catalog:",
     "@void/vue": "catalog:",
     "better-auth": "catalog:",
     "entities": "catalog:",

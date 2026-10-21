@@ -2,6 +2,7 @@
 // A handful of 16px line icons; keeps the UI dependency-free.
 defineProps<{
   name:
+    | "file"
     | "search"
     | "external"
     | "plus"
@@ -26,7 +27,8 @@ defineProps<{
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <template v-if="name === 'search'">
+    <path v-if="name === 'file'" d="M9 1.5H3v13h10v-9L9 1.5zM9 1.5v4h4M5.5 9h5M5.5 11.5h3" />
+    <template v-else-if="name === 'search'">
       <circle cx="7" cy="7" r="4.25" />
       <path d="m13.25 13.25-3.1-3.1" />
     </template>
