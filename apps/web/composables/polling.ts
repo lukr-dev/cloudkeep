@@ -1,18 +1,10 @@
-import { onUnmounted } from "vue";
+import { onMounted, onUnmounted } from "vue";
+import { createPolling } from "../lib/polling.ts";
 export function usePolling(refresh: () => Promise<void>, needed: () => boolean) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
-  function schedule() {
-    clearTimeout(timer);
-    if (!stopped && needed())
-      timer = setTimeout(async () => {
-        await refresh();
-        schedule();
-      }, 3000);
-  }
-  onUnmounted(() => {
-    stopped = true;
-    clearTimeout(timer);
+  let polling: ReturnType<typeof createPolling> | undefined;
+  onMounted(() => {
+    polling = createPolling(refresh, needed, document);
   });
-  return schedule;
+  onUnmounted(() => polling?.stop());
+  return (reset = false) => polling?.schedule(reset);
 }
