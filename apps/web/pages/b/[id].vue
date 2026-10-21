@@ -10,6 +10,14 @@ const MarkdownEditor = defineAsyncComponent(() => import("../../components/Markd
 const features = useFeatures();
 const storageDisabled = computed(() => bookmark.value?.type === "asset" && !features.value.files);
 const readerOpen = ref(false);
+const audioShown = computed(
+  () => features.value.audio && !!(bookmark.value?.audioEnabled || bookmark.value?.audio?.length),
+);
+const audioKinds = computed(() => ({
+  short: bookmark.value?.audio?.find((a) => a.kind === "short"),
+  full: bookmark.value?.audio?.find((a) => a.kind === "full"),
+}));
+const canRead = computed(() => bookmark.value?.type === "link" && !!bookmark.value.contentText);
 const text = ref("");
 const params = useParams<{ id: string }>();
 const router = useRouter();
@@ -256,29 +264,56 @@ function remove() {
       <div v-if="error" class="alert" role="alert">
         <span>{{ error }}</span>
       </div>
-      <section v-if="bookmark.type === 'link' && bookmark.contentText" class="block">
-        <button class="ghost" :aria-expanded="readerOpen" @click="readerOpen = !readerOpen">
-          {{ readerOpen ? "Close reader" : "Read article" }}
-        </button>
-        <article v-if="readerOpen" class="reader">
-          <p v-if="bookmark.contentTruncated" class="hint">
-            Article text was truncated at 20,000 characters.
-          </p>
-          <p v-for="(paragraph, index) in bookmark.contentText.split(/\n\n+/)" :key="index">
-            {{ paragraph }}
-          </p>
-          <a v-if="bookmark.url" :href="bookmark.url" target="_blank" rel="noopener noreferrer"
-            >Read original article</a
+      <section v-if="audioShown || canRead" class="block">
+        <template v-if="audioShown">
+          <h2>Audio <span class="hint">AI-generated voice</span></h2>
+          <div
+            v-for="audio in audioKinds.short ? [audioKinds.short] : []"
+            :key="audio.kind"
+            class="audio-summary"
           >
-        </article>
-      </section>
-      <section
-        v-if="features.audio && (bookmark.audioEnabled || bookmark.audio?.length)"
-        class="block"
-      >
-        <h2>Audio <span class="hint">AI-generated voice</span></h2>
-        <div v-for="audio in bookmark.audio" :key="audio.kind" class="audio-summary">
-          <h3>{{ audio.kind === "short" ? "Short summary" : "Full summary" }}</h3>
+            <h3>Short summary</h3>
+            <p v-if="audio.text" class="summary">{{ audio.text }}</p>
+            <p v-if="audio.status === 'pending' || audio.status === 'processing'" role="status">
+              Generating audio…
+            </p>
+            <p v-if="audio.error" class="alert" role="alert">{{ audio.error }}</p>
+            <template v-if="audio.url">
+              <audio :key="audio.url" controls preload="metadata" :src="audio.url" />
+              <a class="link" :href="audio.url + '&download=1'">Download</a>
+            </template>
+          </div>
+        </template>
+        <div class="row">
+          <button
+            v-if="audioShown"
+            :disabled="
+              busy ||
+              ['pending', 'processing'].includes(bookmark.status) ||
+              ['pending', 'processing'].includes(audioKinds.full?.status ?? '')
+            "
+            @click="fullSummary"
+          >
+            Full summary
+          </button>
+          <button
+            v-if="canRead"
+            class="ghost"
+            :aria-expanded="readerOpen"
+            @click="readerOpen = !readerOpen"
+          >
+            {{ readerOpen ? "Close reader" : "Read article" }}
+          </button>
+        </div>
+        <p v-if="audioShown" class="hint">
+          Full summary creates a detailed spoken summary; run it again to replace it.
+        </p>
+        <div
+          v-for="audio in audioShown && audioKinds.full ? [audioKinds.full] : []"
+          :key="audio.kind"
+          class="audio-summary"
+        >
+          <h3>Full summary</h3>
           <p v-if="audio.text" class="summary">{{ audio.text }}</p>
           <p v-if="audio.status === 'pending' || audio.status === 'processing'" role="status">
             Generating audio…
@@ -289,19 +324,17 @@ function remove() {
             <a class="link" :href="audio.url + '&download=1'">Download</a>
           </template>
         </div>
-        <button
-          :disabled="
-            busy ||
-            ['pending', 'processing'].includes(bookmark.status) ||
-            bookmark.audio?.some(
-              (a) => a.kind === 'full' && ['pending', 'processing'].includes(a.status),
-            )
-          "
-          @click="fullSummary"
-        >
-          Full summary
-        </button>
-        <p class="hint">Generate a detailed spoken summary. Generate again to replace it.</p>
+        <article v-if="canRead && readerOpen" class="reader">
+          <p v-if="bookmark.contentTruncated" class="hint">
+            Article text was truncated at 20,000 characters.
+          </p>
+          <p v-for="(paragraph, index) in bookmark.contentText!.split(/\n\n+/)" :key="index">
+            {{ paragraph }}
+          </p>
+          <a v-if="bookmark.url" :href="bookmark.url" target="_blank" rel="noopener noreferrer"
+            >Read original article</a
+          >
+        </article>
       </section>
       <section v-if="bookmark.summary" class="block">
         <h2>Summary</h2>
