@@ -33,7 +33,8 @@ The Vue interface uses Void file-based pages and client navigation, with no UI f
 
 - `/setup`: first-run admin creation and automatic sign-in. Other screens redirect here until setup is complete.
 - `/login` and `/register?code=…`: password sign-in and invite registration, respectively. Sign-out is in the header.
-- `/`: add links with an optional list, browse metadata, search/filter by `q`, `listId`, and `tag` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. Desktop lists/tags become select filters on mobile.
+- `/`: add links with an optional list, browse metadata, search/filter by `q`, `listId`, and `tag` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. The desktop list sidebar becomes a select filter on mobile.
+- `/tags`: a tag cloud of all used tags (sized by bookmark count, log scale) with a client-side filter; each tag links to `/?tag=…`. Loaded in one aggregated query from `GET /api/tags/cloud`.
 - `/b/:id`: edit title/description inline (Save appears when changed), read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
 - `/lists`: create, rename, and delete lists while keeping their bookmarks.
 - `/settings`: provider/model/reasoning effort, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.

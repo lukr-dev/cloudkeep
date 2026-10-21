@@ -1,7 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { allItems, api, ApiError } from "./api.ts";
 import { filterQuery, filterUrl, readFilters } from "./filters.ts";
+import { tagFontSize } from "./tag-cloud.ts";
 afterEach(() => vi.unstubAllGlobals());
+describe("tag cloud sizing", () => {
+  it("scales counts logarithmically from 0.8rem to 2rem", () => {
+    expect(tagFontSize(1, 100)).toBe(0.8);
+    expect(tagFontSize(10, 100)).toBeCloseTo(1.4);
+    expect(tagFontSize(100, 100)).toBe(2);
+    expect(tagFontSize(2, 100)).toBeGreaterThan(tagFontSize(1, 100));
+    expect(tagFontSize(10, 100) - tagFontSize(1, 100)).toBeCloseTo(
+      tagFontSize(100, 100) - tagFontSize(10, 100),
+    );
+  });
+  it("handles empty clouds, single bookmarks and out-of-range counts", () => {
+    expect(tagFontSize(0, 0)).toBe(0.8);
+    expect(tagFontSize(1, 1)).toBe(0.8);
+    expect(tagFontSize(5, 5)).toBe(2);
+    expect(tagFontSize(0, 100)).toBe(0.8);
+    expect(tagFontSize(-1, 100)).toBe(0.8);
+    expect(tagFontSize(200, 100)).toBe(2);
+  });
+});
 describe("JSON API client", () => {
   it("sends JSON with the session cookie and returns typed data", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ ok: true }));

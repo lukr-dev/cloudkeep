@@ -11,7 +11,6 @@ import {
   type BookmarkItem,
   type List,
   type Page,
-  type Tag,
 } from "../lib/api.ts";
 import { filterQuery, filterUrl, readFilters } from "../lib/filters.ts";
 import { useTask } from "../composables/task.ts";
@@ -20,7 +19,6 @@ const router = useRouter();
 const filters = reactive(readFilters(router.query));
 const bookmarks = ref<BookmarkItem[]>([]);
 const lists = ref<List[]>([]);
-const tags = ref<Tag[]>([]);
 const total = ref(0);
 const loading = ref(true);
 const loadError = ref("");
@@ -33,10 +31,9 @@ let disposed = false;
 let controller: AbortController | undefined;
 const hasFilters = computed(() => !!(filters.q || filters.listId || filters.tag));
 const activeList = computed(() => lists.value.find((list) => list.id === filters.listId));
-const usedTags = computed(() => tags.value.filter((tag) => tag.count));
 async function refreshCatalog() {
-  const result = await Promise.all([allItems<List>("/api/lists"), allItems<Tag>("/api/tags")]);
-  if (!disposed) [lists.value, tags.value] = result;
+  const result = await allItems<List>("/api/lists");
+  if (!disposed) lists.value = result;
 }
 async function load(more = false, background = false) {
   const current = ++request;
@@ -180,6 +177,7 @@ onUnmounted(() => {
       <Link href="/" class="filter" :aria-current="!hasFilters ? 'page' : undefined"
         ><span>All bookmarks</span></Link
       >
+      <Link href="/tags" class="filter"><span>Tags</span></Link>
       <div class="sidebar-head">
         <h2>Lists</h2>
         <Link href="/lists" class="sidebar-action" aria-label="Manage lists"
@@ -195,17 +193,6 @@ onUnmounted(() => {
         class="filter"
         ><span class="break">{{ list.name }}</span
         ><span class="count tabular">{{ list.count }}</span></Link
-      >
-      <div class="sidebar-head"><h2>Tags</h2></div>
-      <p v-if="!usedTags.length" class="sidebar-empty">Tags appear as links are tagged</p>
-      <Link
-        v-for="tag in usedTags"
-        :key="tag.id"
-        :href="filterUrl({ ...filters, tag: filters.tag === tag.name ? '' : tag.name })"
-        :aria-current="filters.tag === tag.name ? 'page' : undefined"
-        class="filter"
-        ><span class="break">{{ tag.name }}</span
-        ><span class="count tabular">{{ tag.count }}</span></Link
       >
     </aside>
     <section class="results" aria-label="Bookmarks" :aria-busy="loading">
@@ -236,11 +223,7 @@ onUnmounted(() => {
             <option value="">All lists</option>
             <option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option>
           </select>
-          <label for="filter-tag" class="sr-only">Tag</label
-          ><select id="filter-tag" v-model="filters.tag" @change="apply">
-            <option value="">All tags</option>
-            <option v-for="tag in usedTags" :key="tag.id" :value="tag.name">{{ tag.name }}</option>
-          </select>
+          <Link href="/tags" class="button">Tags</Link>
         </div>
         <button type="submit" class="sr-only">Search</button>
       </form>
@@ -520,7 +503,7 @@ onUnmounted(() => {
   }
   .mobile-filters {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     flex-basis: 100%;
   }
 }

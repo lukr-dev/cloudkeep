@@ -1,8 +1,8 @@
 import { defineHandler } from "void";
 import { requireAuth } from "void/auth";
 import { db, eq, asc, sql } from "void/db";
-import { tags, bookmarkTags } from "../../db/schema.ts";
-import { pagination } from "../../lib/validators.ts";
+import { tags, bookmarkTags } from "../../../db/schema.ts";
+import { pagination } from "../../../lib/validators.ts";
 
 export const GET = defineHandler.withValidator({ query: pagination })(async (c, { query }) => ({
   items: await db
