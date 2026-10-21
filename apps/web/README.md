@@ -72,6 +72,18 @@ Production runs at https://cloudkeep.toastnet.work (Worker `cloudkeep`, D1 `clou
 
 Void infers D1, auth and queues from the code; AI is explicitly enabled and R2 is optional. It provisions them and applies checked-in migrations on deploy. Review the plan/account and current Free-tier quotas before deploying. An unlinked local app uses Void's AI proxy; a direct Cloudflare project uses a remote Workers AI binding and needs a Cloudflare login/token even in development. There is no local Workers AI simulator. Void uses its own Cloudflare login (`void cloudflare login`); `wrangler login` does not configure it.
 
+### Continuous deployment
+
+`.github/workflows/deploy.yml` deploys production on pushes to `main` and via **Run workflow** (`workflow_dispatch`, select `main`). Deploys run one at a time, without an approval gate, after `vp check` and `vp test` pass.
+
+Set the repository secret `CLOUDFLARE_API_TOKEN` with account permissions **Workers Scripts: Edit**, **D1: Edit**, **Queues: Edit**, **Workers AI: Read** and **Account Settings: Read**, plus the custom-domain zone permissions listed above. Optionally set `CLOUDFLARE_ACCOUNT_ID` as a repository secret or variable; the account ID is already pinned in `void.lock.json`. Set the repository variable `CLOUDKEEP_FILES` to `true` only to enable R2; unset keeps production file storage off. Enabling it also requires **Workers R2 Storage: Edit** and R2 enabled on the account.
+
+If the Worker has no version preview URL, set the repository variable `CLOUDFLARE_WORKERS_SUBDOMAIN` to the account's Workers subdomain (for example `my-team`); fresh CI runners cannot use a locally cached subdomain for readiness checks.
+
+Each deploy applies pending D1 migrations. Rollback restores code and triggers but does **not** undo database migrations.
+
+### AI providers
+
 External OpenAI/OpenRouter requests go directly to their documented chat-completions endpoints with the selected user's decrypted API key. Void's `ai.provider()` uses project-wide secrets/Gateway credentials, so it is deliberately not used for per-user keys. There is no OAuth or subscription authentication. Default models:
 
 | Provider     | Default model                   | Key                         |
