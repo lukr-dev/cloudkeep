@@ -1,7 +1,7 @@
 import { processingListForCreate } from "../../../lib/processing-list.ts";
 import { defineHandler } from "void";
 import { requireAuth } from "void/auth";
-import { db, and, eq, desc, or, sql, count, inArray } from "void/db";
+import { db, and, eq, desc, or, sql, count, inArray, isNull, isNotNull } from "void/db";
 import { z } from "zod";
 import {
   bookmarkAudio,
@@ -12,12 +12,18 @@ import {
   tags,
 } from "../../../db/schema.ts";
 import { idSchema, fail, publicBookmark } from "../../../lib/http.ts";
-import { createBookmark, pagination, bookmarkType } from "../../../lib/validators.ts";
+import {
+  archivedQuery,
+  bookmarkType,
+  createBookmark,
+  pagination,
+} from "../../../lib/validators.ts";
 import { markdownExcerpt } from "../../../lib/assets.ts";
 import { enqueue } from "../../../lib/enqueue.ts";
 
 export const GET = defineHandler.withValidator({
   query: pagination.extend({
+    archived: archivedQuery,
     type: bookmarkType.optional(),
     listId: idSchema.optional(),
     tag: z.string().trim().toLowerCase().min(1).max(40).optional(),
@@ -28,6 +34,7 @@ export const GET = defineHandler.withValidator({
   const pattern = `%${(query.q ?? "").replace(/[\\%_]/g, "\\$&")}%`;
   const where = and(
     eq(bookmarks.userId, userId),
+    query.archived ? isNotNull(bookmarks.archivedAt) : isNull(bookmarks.archivedAt),
     query.type ? eq(bookmarks.type, query.type) : undefined,
     query.listId
       ? sql`exists (select 1 from ${bookmarkLists} where ${bookmarkLists.bookmarkId} = ${bookmarks.id} and ${bookmarkLists.listId} = ${query.listId})`
@@ -155,6 +162,7 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
           // Break millisecond ties so re-saving always moves the bookmark to the top.
           createdAt: sql`max(${bumpedAt}, (select max(created_at) + 1 from bookmarks where user_id = ${userId}))`,
           updatedAt: bumpedAt,
+          archivedAt: null,
         })
         .where(where)
         .returning(),

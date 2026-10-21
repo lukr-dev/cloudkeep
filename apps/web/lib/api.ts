@@ -26,6 +26,7 @@ export type Bookmark = {
   processingListId: string | null;
   status: "pending" | "processing" | "done" | "failed";
   error: string | null;
+  archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };

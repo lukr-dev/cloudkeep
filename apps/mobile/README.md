@@ -5,7 +5,9 @@ Vue Lynx frontend with a hand-written Kotlin Android host. The host loads `main.
 ## Layout
 
 ```text
-src/                   Vue Lynx screens, native bridge, API helpers and tests
+src/                   App state/actions (App.vue), native bridge, API helpers and tests
+  screens/             Presentational screens (login, feed, detail, lists, add, share, settings)
+  components/          Shared UI: app bar, bottom nav, buttons, chips, cards, dialogs, icons
 scripts/smoke-api.mjs   Fresh-local-server bearer authentication smoke check
 android/               Gradle wrapper, Kotlin host and JVM tests
   app/src/main/        Activities, secure storage, native module, Android resources
@@ -29,9 +31,21 @@ Rspeedy prints the bundle URL, normally `http://<machine-ip>:3000/main.lynx.bund
 
 Explorer lacks the custom CloudKeep module. Its development fallback uses Lynx's `fetch` and keeps credentials only in memory. Android sharing, secure persistence, return-to-app and browser opening must be tested in the CloudKeep APK. For a local backend use a device-reachable server URL; `localhost` on a phone refers to the phone. Release APKs accept HTTPS connections only; debug APKs allow HTTP for local development.
 
-The app uses native `default-value` / `@input` bindings (`event.detail.value`) and imperative `setValue` for programmatic changes because native `v-model` is not implemented in Vue Lynx. A small tested binding avoids rewriting native text on every keystroke (preserving cursor/focus), while resetting cleared passwords and pre-filling shared URLs or renamed lists. Screens use small reactive navigation state; no browser history, KeepAlive or Teleport is needed. Bookmark rows use a vertical `<scroll-view>` with ordinary keyed views, pagination and the Refresh button. Native XElement input/refresh packages and image/HTTP services are registered in the host; pull-to-refresh is currently disabled (see device-fix notes below).
+The app uses native `default-value` / `@input` bindings (`event.detail.value`) and imperative `setValue` for programmatic changes because native `v-model` is not implemented in Vue Lynx. A small tested binding avoids rewriting native text on every keystroke (preserving cursor/focus), while resetting cleared passwords and pre-filling renamed lists. Screens use small reactive navigation state; no browser history, KeepAlive or Teleport is needed. Bookmark rows use a vertical `<scroll-view>` with ordinary keyed views, pagination and the Refresh button. Native XElement input/refresh/SVG packages and image/HTTP services are registered in the host; pull-to-refresh is currently disabled (see device-fix notes below).
 
 Vue Lynx 0.5.1 is pre-alpha. Rspeedy is pinned to 0.13.3 / Rsbuild 1 to match its peer requirements; mobile TypeScript is pinned to 5.9.3 because Rspeedy needs the JavaScript compiler API that the repository's TypeScript 7 package does not provide. Vue and Vite+ use workspace catalog versions. `vue-tsc` checks Lynx templates with its Volar plugin; Vite+ checks the rest. An ordinary `*.vue` module declaration supports Vite+'s TypeScript check; there are no Lynx source lint/format ignores. The transitive `core-js` install script only prints funding information and is explicitly disabled in workspace build policy.
+
+## UI structure and theme
+
+`App.vue` owns all state, API calls, navigation and the share startup sequence; screens and components only receive props and emit events. Navigation is a bottom bar (Bookmarks, Lists, Settings) plus a floating Add button on the feed. Detail, Add and the Ask share picker are full-screen sub-screens without the bottom bar.
+
+Design tokens mirror the web app (`apps/web/style.css`) as CSS custom properties on the root `.app` element, with `.app.dark` overriding them. Use `var(--bg)`, `var(--surface)`, `var(--text)`, `var(--muted)`, `var(--accent)` and the others instead of hard-coded colours. `@media (prefers-color-scheme)` cannot be used: the bundle encoder (`@lynx-js/tasm` 0.0.26) drops `@media` rules. The host passes the system theme as `lynx.__globalProps.colorScheme` before the first render, then sends a `cloudkeepTheme` global event (`"light"` / `"dark"`) when it changes. MainActivity handles `uiMode` configuration changes itself, so a theme switch keeps the current screen and any pending share. Bottom bars use `--bg` because the native container paints the gesture/navigation area in that colour.
+
+Text uses Geist, shipped as static TTFs in `android/app/src/main/assets/fonts/` (SIL OFL, see `OFL.txt`) and loaded with `@font-face { src: url("asset:///fonts/…") }`. Each weight is its own family (`Geist`, `GeistMedium`, `GeistSemiBold`) to avoid synthetic bold. Lynx text does not inherit fonts from views, so the global `text {}` rule sets the base family and colour. Explorer has no such assets and falls back to the system sans.
+
+Icons are inline SVG strings (`src/icons.ts`) rendered by the `<svg content>` element from `xelement-svg`. SVG content cannot read CSS variables, so `Icon.vue` resolves the colour from the injected `dark` flag. Its tone colours must stay in sync with the tokens.
+
+Back navigation: the frontend calls `setBackHandler({ enabled })` whenever it has something to go back to (a dialog, rename mode, a sub-screen or tab other than Bookmarks, or an Ask share). While enabled, MainActivity forwards system Back as a `cloudkeepBack` global event instead of leaving the app. During an Ask share, Back cancels the share and returns to the previous app.
 
 ## Build an APK locally
 
@@ -133,6 +147,7 @@ Retest on the phone:
 - Feed: show the first 20 of the 28 links, scroll to Load more, load the remaining links, then search/filter, delete and Refresh. Check empty results and a failed/offline refresh too.
 - Ask: cold start and warm app, cached lists with slow/offline networking, an empty cache, sign-in with a pending URL, save with no lists, cancel/return, and share again. Refresh should retain chosen list IDs. Rotate before saving and after cancel/save; a completed share must not reopen.
 - Quick: new link, duplicate, default list, no list, expired token, deleted list and offline fallback. It should stay in the source app on success.
+- Design: every screen in light and dark mode, switching the system theme while the app is open, Geist rendering, icons, the launcher icon, and Back from detail/add/lists/settings/share/dialogs.
 - Insets: portrait/landscape, status bar/cutout, gesture and three-button navigation. Open the keyboard for login, Link URL, tag and list editing; focused inputs and save controls should remain reachable by scrolling.
 
 Frontend regression tests execute App.vue's actual setup with catalog requests held open, exercise a warm-share event and ignore stale-session failures. JVM tests cover migration, pending-URL precedence, account-cache clearing and malformed list caches. Workstation tests cannot prove native rendering, focus scrolling, rotation or physical-device latency.

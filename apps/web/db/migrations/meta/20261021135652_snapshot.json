@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "da98ed7c-86c5-4f6a-817a-d205ec942b79",
-  "prevId": "673ce2ea-bee8-43b8-86c6-d26fffcfe531",
+  "id": "a0dea512-5f34-4648-bbc7-f0a0981b5856",
+  "prevId": "66078ba3-4712-4027-9679-14996709ddfa",
   "tables": {
     "bookmark_audio": {
       "name": "bookmark_audio",
@@ -411,6 +411,13 @@
           "autoincrement": false,
           "default": false
         },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -436,6 +443,12 @@
           "name": "bookmarks_user_created",
           "columns": ["user_id", "created_at", "id"],
           "isUnique": false
+        },
+        "bookmarks_user_active_created": {
+          "name": "bookmarks_user_active_created",
+          "columns": ["user_id", "created_at", "id"],
+          "isUnique": false,
+          "where": "\"bookmarks\".\"archived_at\" is null"
         }
       },
       "foreignKeys": {

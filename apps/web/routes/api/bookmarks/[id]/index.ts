@@ -51,7 +51,8 @@ export const PATCH = defineHandler.withValidator({ params: idParams, body: editB
   const existing = await ownBookmark(userId, params.id);
   if (body.text !== undefined && existing.type !== "text")
     return fail(400, "Text is only supported for notes");
-  const { text, ...fields } = body;
+  const { text, archived, ...fields } = body;
+  const now = Date.now();
   const [bookmark] = await db
     .update(bookmarks)
     .set({
@@ -59,9 +60,10 @@ export const PATCH = defineHandler.withValidator({ params: idParams, body: editB
       ...(text !== undefined
         ? { noteText: text, runId: crypto.randomUUID(), status: "pending" as const, error: null }
         : {}),
+      ...(archived !== undefined ? { archivedAt: archived ? now : null } : {}),
       ...(body.title !== undefined ? { titleEdited: true } : {}),
       ...(body.description !== undefined ? { descriptionEdited: true } : {}),
-      updatedAt: Date.now(),
+      updatedAt: now,
     })
     .where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, params.id)))
     .returning();
