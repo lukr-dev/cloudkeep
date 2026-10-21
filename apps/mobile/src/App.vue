@@ -500,12 +500,13 @@ onUnmounted(() => {
       />
       <template v-if="screen === 'detail' && detail && !shared"
         ><Button
+          v-if="detail.url"
           label="Open in browser"
           icon="external"
           icon-only
           quiet
           :disabled="busy"
-          @press="open(detail.url)" /><Button
+          @press="detail.url && open(detail.url)" /><Button
           label="Delete bookmark"
           icon="trash"
           icon-only
@@ -590,7 +591,7 @@ onUnmounted(() => {
         :lists="lists"
         :tag-name="tagName"
         :busy="busy"
-        @open="open(detail.url)"
+        @open="detail.url && open(detail.url)"
         @refresh="showDetail(detail.id)"
         @tag-name="tagName = $event"
         @add-tag="addTag"

@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { domain, relativeAge } from "./presentation.ts";
+import { bookmarkTitle, domain, relativeAge, sourceName } from "./presentation.ts";
 import { iconSvg } from "./icons.ts";
 it("extracts a display domain without the URL global", () => {
   expect(domain("https://www.example.com:8443/path?q=x")).toBe("example.com");
@@ -7,6 +7,20 @@ it("extracts a display domain without the URL global", () => {
   expect(domain("https://[::1]:8080/path")).toBe("[::1]");
   expect(domain("https://user@example.com/page")).toBe("example.com");
   expect(domain("invalid")).toBe("invalid");
+});
+it("labels notes and files that have no URL", () => {
+  const base = { url: null, title: null, assetName: null, assetType: null } as const;
+  expect(sourceName({ ...base, type: "text" })).toBe("Note");
+  expect(sourceName({ ...base, type: "asset", assetType: "pdf" })).toBe("PDF");
+  expect(sourceName({ ...base, type: "asset", assetType: "image" })).toBe("Image");
+  expect(sourceName({ ...base, type: "link", url: "https://www.example.com/a" })).toBe(
+    "example.com",
+  );
+  expect(bookmarkTitle({ ...base, type: "text" })).toBe("Untitled note");
+  expect(bookmarkTitle({ ...base, type: "asset", assetName: "scan.pdf" })).toBe("scan.pdf");
+  expect(bookmarkTitle({ ...base, type: "link", url: "https://example.com" })).toBe(
+    "https://example.com",
+  );
 });
 it("formats relative bookmark ages at unit boundaries", () => {
   const now = 1_800_000_000_000;
