@@ -3,7 +3,15 @@ export type TagLink = { id: string; name: string; source: "manual" | "ai" };
 export type Bookmark = {
   id: string;
   userId: string;
-  url: string;
+  type: "link" | "text" | "asset";
+  url: string | null;
+  noteText: string | null;
+  assetType: "image" | "pdf" | null;
+  assetMime: string | null;
+  assetName: string | null;
+  assetSize: number | null;
+  hasFile: boolean;
+  fileUrl: string | null;
   title: string | null;
   description: string | null;
   imageUrl: string | null;
@@ -17,7 +25,9 @@ export type Bookmark = {
   updatedAt: number;
 };
 export type BookmarkDetail = Bookmark & { tags: TagLink[]; listIds: string[] };
-export type BookmarkItem = Omit<BookmarkDetail, "contentText">;
+export type BookmarkItem = Omit<BookmarkDetail, "contentText" | "noteText"> & {
+  excerpt: string | null;
+};
 export type List = {
   id: string;
   name: string;

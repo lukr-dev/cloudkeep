@@ -11,6 +11,6 @@ export default defineConfig({
     htmlAttrs: { lang: "en" },
     meta: [{ name: "viewport", content: "width=device-width, initial-scale=1" }],
   },
-  // `void/ai` is imported from lib/, which binding inference doesn't scan.
-  inference: { bindings: { ai: true } },
+  // lib/ is not scanned by binding inference.
+  inference: { bindings: { ai: true, storage: true } },
 });
