@@ -9,6 +9,7 @@ import { usePolling } from "../../composables/polling.ts";
 const MarkdownEditor = defineAsyncComponent(() => import("../../components/MarkdownEditor.vue"));
 const features = useFeatures();
 const storageDisabled = computed(() => bookmark.value?.type === "asset" && !features.value.files);
+const readerOpen = ref(false);
 const text = ref("");
 const params = useParams<{ id: string }>();
 const router = useRouter();
@@ -65,7 +66,9 @@ const schedule = usePolling(
   () =>
     !loadError.value &&
     !!bookmark.value &&
-    ["pending", "processing"].includes(bookmark.value.status),
+    (["pending", "processing"].includes(bookmark.value.status) ||
+      (features.value.audio &&
+        bookmark.value.audio?.some((a) => ["pending", "processing"].includes(a.status)))),
 );
 onMounted(() => void load(true));
 function save() {
@@ -103,6 +106,12 @@ function membership(id: string) {
       method: bookmark.value?.listIds.includes(id) ? "DELETE" : "PUT",
       ...(bookmark.value?.listIds.includes(id) ? {} : { body: {} }),
     });
+    await load();
+  });
+}
+function fullSummary() {
+  return run(async () => {
+    await api(`${path}/audio/full`, { method: "POST", body: {} });
     await load();
   });
 }
@@ -247,6 +256,53 @@ function remove() {
       <div v-if="error" class="alert" role="alert">
         <span>{{ error }}</span>
       </div>
+      <section v-if="bookmark.type === 'link' && bookmark.contentText" class="block">
+        <button class="ghost" :aria-expanded="readerOpen" @click="readerOpen = !readerOpen">
+          {{ readerOpen ? "Close reader" : "Read article" }}
+        </button>
+        <article v-if="readerOpen" class="reader">
+          <p v-if="bookmark.contentTruncated" class="hint">
+            Article text was truncated at 20,000 characters.
+          </p>
+          <p v-for="(paragraph, index) in bookmark.contentText.split(/\n\n+/)" :key="index">
+            {{ paragraph }}
+          </p>
+          <a v-if="bookmark.url" :href="bookmark.url" target="_blank" rel="noopener noreferrer"
+            >Read original article</a
+          >
+        </article>
+      </section>
+      <section
+        v-if="features.audio && (bookmark.audioEnabled || bookmark.audio?.length)"
+        class="block"
+      >
+        <h2>Audio <span class="hint">AI-generated voice</span></h2>
+        <div v-for="audio in bookmark.audio" :key="audio.kind" class="audio-summary">
+          <h3>{{ audio.kind === "short" ? "Short summary" : "Full summary" }}</h3>
+          <p v-if="audio.text" class="summary">{{ audio.text }}</p>
+          <p v-if="audio.status === 'pending' || audio.status === 'processing'" role="status">
+            Generating audio…
+          </p>
+          <p v-if="audio.error" class="alert" role="alert">{{ audio.error }}</p>
+          <template v-if="audio.url">
+            <audio :key="audio.url" controls preload="metadata" :src="audio.url" />
+            <a class="link" :href="audio.url + '&download=1'">Download</a>
+          </template>
+        </div>
+        <button
+          :disabled="
+            busy ||
+            ['pending', 'processing'].includes(bookmark.status) ||
+            bookmark.audio?.some(
+              (a) => a.kind === 'full' && ['pending', 'processing'].includes(a.status),
+            )
+          "
+          @click="fullSummary"
+        >
+          Full summary
+        </button>
+        <p class="hint">Generate a detailed spoken summary. Generate again to replace it.</p>
+      </section>
       <section v-if="bookmark.summary" class="block">
         <h2>Summary</h2>
         <p class="summary">{{ bookmark.summary }}</p>
@@ -311,6 +367,16 @@ function remove() {
   </article>
 </template>
 <style scoped>
+.reader p,
+.audio-summary {
+  margin: 1rem 0;
+  line-height: 1.7;
+}
+audio {
+  display: block;
+  width: 100%;
+  margin: 0.75rem 0;
+}
 .asset-image {
   display: block;
   max-width: 100%;

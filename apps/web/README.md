@@ -280,3 +280,34 @@ Overrides are 1–12,000 characters. Supported variables are `{{url}}`, `{{title
 Build a mobile client against this contract. Measure deployed CPU and account quotas; verify real Workers AI and external-provider inference with owner credentials. Add key rotation and operational recovery/queue monitoring if needed. Add email delivery/verification/password-reset UX only when required; this phase has no email service. No admin role editor, import/export, archived content, full Readability scoring, or per-list prompts are implemented.
 
 The current Void docs largely match the brief. Differences: init inside an existing workspace configures the app without a Vue picker (the documented `@void/vue` adapter was added manually); `--no-git` is rejected for workspace subpackages; Void already uses native scrypt; Queues now work on Free; unlinked local AI uses a Void proxy rather than the direct remote binding; env files other than `.env` are unsupported; and Better Auth tables/migrations are generated automatically and must not be duplicated in the app schema. `defineConfig` from `vite-plus` works with Void, so no lint-rule exception is needed.
+
+### List AI settings and audio
+
+List settings apply on the first save only. The first customized list in the create request's
+`listIds` order becomes the bookmark's processing list; later list membership changes and
+re-saving an existing URL leave that choice alone. Reprocess uses the chosen list's current
+settings. Deleting that list restores user defaults. Prompts inherit independently from the
+user's prompt, then the built-in default. List provider overrides reuse the user's encrypted keys.
+
+Audio shares the optional R2 switch above (`CLOUDKEEP_FILES=true`). Enable spoken summaries
+in a list's Settings panel; choose default TTS settings in Settings, or override them per list.
+Short audio also generates a summary when automatic summaries are off. Full summary runs on
+demand through the bookmark queue and uses the detailed-summary prompt. Audio errors are
+separate from bookmark errors. Reprocess retries short audio; Full summary retries full audio.
+Existing audio stays available until a replacement succeeds. MP3 download and seeking require
+an authenticated owner session.
+
+TTS models and voices are free text. The defaults are Aura 2 English / `luna`, OpenAI
+`gpt-4o-mini-tts` / `alloy`, and OpenRouter `openai/gpt-4o-mini-tts-2025-12-15` / `alloy`.
+Requests explicitly select MP3 and split text at sentence boundaries (falling back to words
+or character boundaries) at 2,000 characters for Aura and 4,096 for OpenAI/OpenRouter.
+Custom models may have different limits or voice requirements; provider errors appear in
+the audio state without exposing provider response bodies.
+
+Provider contracts verified against the installed Workers types and official documentation:
+[Cloudflare Aura 2](https://developers.cloudflare.com/workers-ai/models/aura-2-en/)
+(binding returns an MPEG stream),
+[Deepgram input limits](https://developers.deepgram.com/docs/text-to-speech),
+[OpenAI speech](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create),
+and [OpenRouter TTS](https://openrouter.ai/docs/guides/overview/multimodal/tts)
+(binary output; its default format is PCM, so CloudKeep requests MP3 explicitly).

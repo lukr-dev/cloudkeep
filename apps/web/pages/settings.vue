@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TtsFields from "../components/TtsFields.vue";
 import { onMounted, reactive, ref } from "vue";
 import {
   api,
@@ -21,7 +22,7 @@ const autoTag = ref(true);
 const autoSummary = ref(false);
 const keys = reactive({ openai: "", openrouter: "" });
 const externalProviders = ["openrouter", "openai"] as const;
-const promptKinds = ["tagging", "summary"] as const;
+const promptKinds = ["tagging", "summary", "detailed_summary"] as const;
 const { busy, error, notice, run } = useTask();
 const providers = [
   { value: "", label: "Off" },
@@ -31,6 +32,7 @@ const providers = [
 ] as const;
 const providerNames = { openai: "OpenAI", openrouter: "OpenRouter" } as const;
 const promptLabels = {
+  detailed_summary: { title: "Detailed summary", hint: "Used for on-demand full summary audio." },
   tagging: { title: "Tagging", hint: "Runs on every new bookmark to pick tags." },
   summary: { title: "Summary", hint: "Runs when automatic summaries are on." },
 } as const;
@@ -75,6 +77,13 @@ function save() {
           autoTag: autoTag.value,
           autoSummary: autoSummary.value,
           keys: changedKeys,
+          ...(features.value.audio && settings.value
+            ? {
+                ttsProvider: settings.value.ttsProvider,
+                ttsModel: settings.value.ttsModel?.trim() || null,
+                ttsVoice: settings.value.ttsVoice?.trim() || null,
+              }
+            : {}),
         },
       }),
     );
@@ -98,7 +107,7 @@ function test() {
     notice.value = "Connection works";
   });
 }
-function savePrompt(kind: "tagging" | "summary", reset = false) {
+function savePrompt(kind: "tagging" | "summary" | "detailed_summary", reset = false) {
   return run(async () => {
     if (!prompts.value) return;
     prompts.value[kind] = await api<Prompt>(`/api/settings/prompts/${kind}`, {
@@ -227,6 +236,14 @@ function savePrompt(kind: "tagging" | "summary", reset = false) {
               bookmarks</label
             >
           </div>
+          <template v-if="features.audio">
+            <h2>Default text to speech</h2>
+            <TtsFields
+              v-model:provider="settings.ttsProvider"
+              v-model:model="settings.ttsModel"
+              v-model:voice="settings.ttsVoice"
+            />
+          </template>
           <div class="row">
             <button class="primary" :disabled="busy">Save</button
             ><button v-if="provider" type="button" class="ghost" :disabled="busy" @click="test">

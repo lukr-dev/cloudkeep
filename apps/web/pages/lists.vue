@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import ListSettings from "../components/ListSettings.vue";
 import { onMounted, ref } from "vue";
 import { Link } from "@void/vue";
 import { allItems, api, type List } from "../lib/api.ts";
 import { filterUrl } from "../lib/filters.ts";
 import { useTask } from "../composables/task.ts";
+const settingsId = ref("");
 const lists = ref<List[]>([]);
 const name = ref("");
 const editId = ref("");
@@ -86,11 +88,20 @@ function remove(list: List) {
           ><button class="primary small" :disabled="busy">Save</button>
         </form>
         <template v-else>
-          <Link :href="filterUrl({ q: '', tag: '', listId: list.id })" class="name break">{{
-            list.name
-          }}</Link>
+          <Link
+            :href="filterUrl({ q: '', tag: '', type: '', listId: list.id })"
+            class="name break"
+            >{{ list.name }}</Link
+          >
           <span class="count tabular">{{ list.count }}</span>
           <div class="actions">
+            <button
+              class="ghost small"
+              :aria-expanded="settingsId === list.id"
+              @click="settingsId = settingsId === list.id ? '' : list.id"
+            >
+              Settings
+            </button>
             <button
               class="ghost small"
               :disabled="busy"
@@ -105,6 +116,7 @@ function remove(list: List) {
             </button>
           </div>
         </template>
+        <ListSettings v-if="settingsId === list.id" :id="list.id" />
       </li>
     </ul>
   </div>
@@ -132,6 +144,7 @@ function remove(list: List) {
 .list-row {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   min-height: 3rem;
@@ -162,6 +175,7 @@ function remove(list: List) {
 .actions {
   position: absolute;
   right: 0.4rem;
+  top: 0.5rem;
   display: flex;
   gap: 0.15rem;
   opacity: 0;

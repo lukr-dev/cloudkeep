@@ -10,7 +10,7 @@ const repository = "https://github.com/lukr-dev/cloudkeep";
 const router = useRouter();
 const user = ref<User | null>(null);
 provide(sessionKey, user);
-const features = ref<Features>({ files: false });
+const features = ref<Features>({ files: false, audio: false });
 provide(featuresKey, features);
 const ready = ref(false);
 const error = ref("");
@@ -34,7 +34,7 @@ async function check() {
       try {
         const me = await api<Me>("/api/me", { redirectOnUnauthorized: false });
         user.value = me.user;
-        features.value = me.features ?? { files: false };
+        features.value = me.features ?? { files: false, audio: false };
       } catch (cause) {
         if (!(cause instanceof Error && "status" in cause && cause.status === 401)) throw cause;
         user.value = null;
