@@ -31,13 +31,16 @@ export const PATCH = defineHandler.withValidator({ params: idParams, body: editB
 ) => {
   const userId = requireAuth(c).id;
   await ownBookmark(userId, params.id);
+  const { archived, ...edits } = body;
+  const now = Date.now();
   const [bookmark] = await db
     .update(bookmarks)
     .set({
-      ...body,
+      ...edits,
+      ...(archived !== undefined ? { archivedAt: archived ? now : null } : {}),
       ...(body.title !== undefined ? { titleEdited: true } : {}),
       ...(body.description !== undefined ? { descriptionEdited: true } : {}),
-      updatedAt: Date.now(),
+      updatedAt: now,
     })
     .where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, params.id)))
     .returning();

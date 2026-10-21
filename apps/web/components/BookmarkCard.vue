@@ -9,7 +9,7 @@ const props = defineProps<{
   filters?: Filters;
   busy?: boolean;
 }>();
-defineEmits<{ retry: [id: string] }>();
+defineEmits<{ retry: [id: string]; archive: [id: string] }>();
 const imageFailed = ref(false);
 const faviconFailed = ref(false);
 const domain = computed(() => {
@@ -84,19 +84,31 @@ const age = computed(() => {
           v-for="tag in bookmark.tags"
           :key="tag.id"
           class="chip"
-          :href="filterUrl({ q: '', listId: '', ...filters, tag: tag.name })"
+          :href="filterUrl({ q: '', listId: '', archived: false, ...filters, tag: tag.name })"
           >{{ tag.name }}</Link
         >
       </div>
     </div>
-    <a
-      :href="bookmark.url"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="open"
-      :aria-label="`Open ${bookmark.title || domain} in a new tab`"
-      ><Icon name="external" :size="15"
-    /></a>
+    <div class="card-actions">
+      <button
+        type="button"
+        class="ghost open"
+        :disabled="busy"
+        :aria-label="bookmark.archivedAt === null ? 'Archive bookmark' : 'Restore bookmark'"
+        :title="bookmark.archivedAt === null ? 'Archive bookmark' : 'Restore bookmark'"
+        @click="$emit('archive', bookmark.id)"
+      >
+        <Icon name="archive" :size="15" />
+      </button>
+      <a
+        :href="bookmark.url"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="open"
+        :aria-label="`Open ${bookmark.title || domain} in a new tab`"
+        ><Icon name="external" :size="15"
+      /></a>
+    </div>
   </article>
 </template>
 <style scoped>
@@ -215,6 +227,10 @@ const age = computed(() => {
   gap: 0.3rem;
   margin-top: 0.55rem;
 }
+.card-actions {
+  display: flex;
+  flex-shrink: 0;
+}
 .open {
   position: relative;
   z-index: 1;
@@ -222,6 +238,7 @@ const age = computed(() => {
   place-items: center;
   width: 2rem;
   height: 2rem;
+  padding: 0;
   flex-shrink: 0;
   border-radius: var(--radius);
   color: var(--muted);
@@ -252,7 +269,7 @@ const age = computed(() => {
   .thumb {
     width: 4.5rem;
   }
-  .open {
+  a.open {
     display: none;
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { archivedQuery, editBookmark } from "./validators.ts";
 import { normalizeUrl } from "./url.ts";
 import { DEFAULT_PROMPTS, parseTags, renderPrompt } from "./prompts.ts";
 import { decrypt, encrypt, hashPassword, safeEqual, verifyPassword } from "./crypto.ts";
@@ -175,4 +176,23 @@ it("compares setup tokens without leaking length", async () => {
   expect(await safeEqual("setup-token-123", "setup-token-123")).toBe(true);
   expect(await safeEqual("setup-token-123", "setup-token-124")).toBe(false);
   expect(await safeEqual("short", "a much longer token value")).toBe(false);
+});
+
+describe("bookmark archive validation", () => {
+  it("accepts archive-only edits and combined metadata edits", () => {
+    expect(editBookmark.parse({ archived: true })).toEqual({ archived: true });
+    expect(editBookmark.parse({ archived: false })).toEqual({ archived: false });
+    expect(editBookmark.parse({ archived: true, title: " Edited ", description: null })).toEqual({
+      archived: true,
+      title: "Edited",
+      description: null,
+    });
+    for (const body of [{}, { archived: "true" }, { archivedAt: 123 }, { archived: null }])
+      expect(editBookmark.safeParse(body).success).toBe(false);
+  });
+  it("defaults to active bookmarks and validates boolean query flags", () => {
+    for (const value of [undefined, "0", "false"]) expect(archivedQuery.parse(value)).toBe(false);
+    for (const value of ["1", "true"]) expect(archivedQuery.parse(value)).toBe(true);
+    for (const value of ["yes", "", 1]) expect(archivedQuery.safeParse(value).success).toBe(false);
+  });
 });

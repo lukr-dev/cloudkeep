@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, provide, ref, watch } from "vue";
+import { onMounted, onUnmounted, provide, ref, watch } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { api, message, type User } from "../lib/api.ts";
 import { sessionKey } from "../composables/session.ts";
 import { toast } from "../composables/toast.ts";
 import Icon from "../components/Icon.vue";
+import { trackNavigation } from "../lib/navigation.ts";
 import "../style.css";
 const repository = "https://github.com/lukr-dev/cloudkeep";
 const router = useRouter();
@@ -54,7 +55,10 @@ async function check() {
     if (current === generation) error.value = message(cause);
   }
 }
+let stopTracking: (() => void) | undefined;
+onUnmounted(() => stopTracking?.());
 onMounted(() => {
+  stopTracking = trackNavigation();
   watch(
     () => router.path,
     () => void check(),

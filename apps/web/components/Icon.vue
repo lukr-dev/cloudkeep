@@ -4,6 +4,7 @@ defineProps<{
   name:
     | "search"
     | "external"
+    | "archive"
     | "plus"
     | "x"
     | "arrow-left"
@@ -31,6 +32,10 @@ defineProps<{
       <path d="m13.25 13.25-3.1-3.1" />
     </template>
     <path v-else-if="name === 'external'" d="M6.5 3.5h-3v9h9v-3M9.5 2.75h3.75V6.5M13 3 7.75 8.25" />
+    <path
+      v-else-if="name === 'archive'"
+      d="M2.5 6h11v7.25h-11zM1.75 2.75h12.5V6H1.75zM6.5 8.75h3"
+    />
     <path v-else-if="name === 'plus'" d="M8 3.25v9.5M3.25 8h9.5" />
     <path v-else-if="name === 'x'" d="m4.25 4.25 7.5 7.5m0-7.5-7.5 7.5" />
     <path v-else-if="name === 'arrow-left'" d="M12.75 8H3.5M7.25 4.25 3.5 8l3.75 3.75" />

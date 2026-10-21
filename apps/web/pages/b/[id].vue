@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Link, useParams, useRouter } from "@void/vue";
-import { allItems, api, message, type BookmarkDetail, type List } from "../../lib/api.ts";
+import {
+  allItems,
+  api,
+  message,
+  type Bookmark,
+  type BookmarkDetail,
+  type List,
+} from "../../lib/api.ts";
 import { useTask } from "../../composables/task.ts";
 import Icon from "../../components/Icon.vue";
+import BookmarkLayout from "../../components/BookmarkLayout.vue";
+import { canGoBack } from "../../lib/navigation.ts";
 import { usePolling } from "../../composables/polling.ts";
 const params = useParams<{ id: string }>();
 const router = useRouter();
@@ -33,6 +42,9 @@ function discard() {
   title.value = bookmark.value?.title ?? "";
   description.value = bookmark.value?.description ?? "";
 }
+async function refreshLists() {
+  lists.value = await allItems<List>("/api/lists");
+}
 const path = `/api/bookmarks/${params.id}` as const;
 async function load(initial = false) {
   loadError.value = "";
@@ -43,7 +55,7 @@ async function load(initial = false) {
     if (initial || description.value === (bookmark.value?.description ?? ""))
       description.value = next.description ?? "";
     bookmark.value = next;
-    if (initial) lists.value = await allItems<List>("/api/lists");
+    if (initial) await refreshLists();
   } catch (cause) {
     loadError.value = message(cause);
   } finally {
@@ -88,7 +100,7 @@ function membership(id: string) {
       method: bookmark.value?.listIds.includes(id) ? "DELETE" : "PUT",
       ...(bookmark.value?.listIds.includes(id) ? {} : { body: {} }),
     });
-    await load();
+    await Promise.all([load(), refreshLists()]);
   });
 }
 function reprocess() {
@@ -101,6 +113,21 @@ function reprocess() {
     }
   });
 }
+function archive() {
+  return run(async () => {
+    if (!bookmark.value) return;
+    const archived = bookmark.value.archivedAt === null;
+    const result = await api<{ bookmark: Bookmark }>(path, { method: "PATCH", body: { archived } });
+    bookmark.value.archivedAt = result.bookmark.archivedAt;
+    bookmark.value.updatedAt = result.bookmark.updatedAt;
+    notice.value = archived ? "Bookmark archived" : "Bookmark restored";
+    await refreshLists();
+  });
+}
+function back() {
+  if (canGoBack()) window.history.back();
+  else void router.visit("/");
+}
 function remove() {
   if (!window.confirm("Delete this bookmark? This can’t be undone.")) return;
   return run(async () => {
@@ -110,145 +137,157 @@ function remove() {
 }
 </script>
 <template>
-  <article class="detail">
-    <Link href="/" class="back"><Icon name="arrow-left" :size="14" />Bookmarks</Link>
-    <div v-if="loadError" class="alert" role="alert">
-      <span>{{ loadError }}</span
-      ><button @click="load(!bookmark)">Try again</button>
-    </div>
-    <div v-if="loading" class="loading" aria-hidden="true">
-      <div class="skeleton hero"></div>
-      <div class="skeleton line short"></div>
-      <div class="skeleton line"></div>
-    </div>
-    <template v-if="bookmark">
-      <a
-        v-if="bookmark.imageUrl && !imageFailed"
-        :href="bookmark.url"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="hero fade-in"
-        tabindex="-1"
-        aria-hidden="true"
-        ><img
-          :src="bookmark.imageUrl"
-          alt=""
-          referrerpolicy="no-referrer"
-          @error="imageFailed = true"
-      /></a>
-      <div class="source">
-        <img
-          v-if="bookmark.faviconUrl"
-          :src="bookmark.faviconUrl"
-          alt=""
-          class="favicon"
-          referrerpolicy="no-referrer"
-        />
-        <span>{{ bookmark.siteName || domain }}</span>
-        <span aria-hidden="true">·</span>
-        <span>Saved {{ new Date(bookmark.createdAt).toLocaleDateString() }}</span>
+  <BookmarkLayout :lists="lists">
+    <article class="detail">
+      <button type="button" class="ghost small back" @click="back">
+        <Icon name="arrow-left" :size="14" />Back
+      </button>
+      <div v-if="loadError" class="alert" role="alert">
+        <span>{{ loadError }}</span
+        ><button @click="load(!bookmark)">Try again</button>
       </div>
-      <form class="edit" @submit.prevent="save">
-        <label for="title" class="sr-only">Title</label>
-        <textarea
-          id="title"
-          v-model="title"
-          class="title-input"
-          rows="1"
-          maxlength="1000"
-          :placeholder="bookmark.url"
-          @keydown.enter.prevent="dirty && save()"
-        />
-        <label for="description" class="sr-only">Description</label>
-        <textarea
-          id="description"
-          v-model="description"
-          class="description-input"
-          rows="3"
-          maxlength="4000"
-          placeholder="Add a description"
-        />
-        <div v-if="dirty" class="edit-actions fade-in">
-          <button type="button" class="ghost small" :disabled="busy" @click="discard">Cancel</button
-          ><button class="primary small" :disabled="busy">Save</button>
+      <div v-if="loading" class="loading" aria-hidden="true">
+        <div class="skeleton hero"></div>
+        <div class="skeleton line short"></div>
+        <div class="skeleton line"></div>
+      </div>
+      <template v-if="bookmark">
+        <a
+          v-if="bookmark.imageUrl && !imageFailed"
+          :href="bookmark.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hero fade-in"
+          tabindex="-1"
+          aria-hidden="true"
+          ><img
+            :src="bookmark.imageUrl"
+            alt=""
+            referrerpolicy="no-referrer"
+            @error="imageFailed = true"
+        /></a>
+        <div class="source">
+          <img
+            v-if="bookmark.faviconUrl"
+            :src="bookmark.faviconUrl"
+            alt=""
+            class="favicon"
+            referrerpolicy="no-referrer"
+          />
+          <span>{{ bookmark.siteName || domain }}</span>
+          <span aria-hidden="true">·</span>
+          <span>Saved {{ new Date(bookmark.createdAt).toLocaleDateString() }}</span>
         </div>
-      </form>
-      <a :href="bookmark.url" target="_blank" rel="noopener noreferrer" class="url"
-        ><span class="break">{{ bookmark.url }}</span
-        ><Icon name="external" :size="13"
-      /></a>
-      <p v-if="['pending', 'processing'].includes(bookmark.status)" class="status" role="status">
-        <span class="dot pulse"></span>Fetching details. This page updates on its own.
-      </p>
-      <div v-if="bookmark.status === 'failed'" class="alert" role="alert">
-        <span>{{ bookmark.error || "Couldn’t process this page." }}</span
-        ><button :disabled="busy" @click="reprocess">Retry</button>
-      </div>
-      <div v-if="error" class="alert" role="alert">
-        <span>{{ error }}</span>
-      </div>
-      <section v-if="bookmark.summary" class="block">
-        <h2>Summary</h2>
-        <p class="summary">{{ bookmark.summary }}</p>
-      </section>
-      <section class="block">
-        <h2>Tags</h2>
-        <div class="pills">
-          <span
-            v-for="tag in bookmark.tags"
-            :key="tag.id"
-            class="chip tag"
-            :title="tag.source === 'ai' ? 'Added by AI' : 'Added by you'"
-            ><span v-if="tag.source === 'ai'" class="ai" aria-label="AI tag">AI</span>{{ tag.name
-            }}<button
-              class="remove"
-              :disabled="busy"
-              :aria-label="`Remove tag ${tag.name}`"
-              @click="removeTag(tag.id)"
-            >
-              <Icon name="x" :size="11" /></button
-          ></span>
-          <form class="tag-form" @submit.prevent="addTag">
-            <label for="tag-name" class="sr-only">Add a tag</label>
-            <input
-              id="tag-name"
-              v-model="tagName"
-              placeholder="Add tag"
-              required
-              maxlength="40"
-              autocomplete="off"
-            />
-          </form>
-        </div>
-      </section>
-      <section class="block">
-        <h2>Lists</h2>
-        <p v-if="!lists.length" class="muted small">
-          No lists yet. <Link href="/lists" class="link">Create one</Link>
+        <p v-if="bookmark.archivedAt !== null" class="status">
+          <Icon name="archive" :size="14" />Archived
         </p>
-        <div v-else class="pills">
-          <button
-            v-for="list in lists"
-            :key="list.id"
-            type="button"
-            class="list-pill"
-            :aria-pressed="bookmark.listIds.includes(list.id)"
-            :disabled="busy"
-            @click="membership(list.id)"
-          >
-            <Icon v-if="bookmark.listIds.includes(list.id)" name="check" :size="13" />{{
-              list.name
-            }}
-          </button>
+        <form class="edit" @submit.prevent="save">
+          <label for="title" class="sr-only">Title</label>
+          <textarea
+            id="title"
+            v-model="title"
+            class="title-input"
+            rows="1"
+            maxlength="1000"
+            :placeholder="bookmark.url"
+            @keydown.enter.prevent="dirty && save()"
+          />
+          <label for="description" class="sr-only">Description</label>
+          <textarea
+            id="description"
+            v-model="description"
+            class="description-input"
+            rows="3"
+            maxlength="4000"
+            placeholder="Add a description"
+          />
+          <div v-if="dirty" class="edit-actions fade-in">
+            <button type="button" class="ghost small" :disabled="busy" @click="discard">
+              Cancel</button
+            ><button class="primary small" :disabled="busy">Save</button>
+          </div>
+        </form>
+        <a :href="bookmark.url" target="_blank" rel="noopener noreferrer" class="url"
+          ><span class="break">{{ bookmark.url }}</span
+          ><Icon name="external" :size="13"
+        /></a>
+        <p v-if="['pending', 'processing'].includes(bookmark.status)" class="status" role="status">
+          <span class="dot pulse"></span>Fetching details. This page updates on its own.
+        </p>
+        <div v-if="bookmark.status === 'failed'" class="alert" role="alert">
+          <span>{{ bookmark.error || "Couldn’t process this page." }}</span
+          ><button :disabled="busy" @click="reprocess">Retry</button>
         </div>
-      </section>
-      <footer class="actions">
-        <button class="ghost small" :disabled="busy" @click="reprocess">
-          <Icon name="refresh" :size="13" />Fetch again</button
-        ><button class="ghost small danger" :disabled="busy" @click="remove">Delete</button>
-      </footer>
-    </template>
-  </article>
+        <div v-if="error" class="alert" role="alert">
+          <span>{{ error }}</span>
+        </div>
+        <section v-if="bookmark.summary" class="block">
+          <h2>Summary</h2>
+          <p class="summary">{{ bookmark.summary }}</p>
+        </section>
+        <section class="block">
+          <h2>Tags</h2>
+          <div class="pills">
+            <span
+              v-for="tag in bookmark.tags"
+              :key="tag.id"
+              class="chip tag"
+              :title="tag.source === 'ai' ? 'Added by AI' : 'Added by you'"
+              ><span v-if="tag.source === 'ai'" class="ai" aria-label="AI tag">AI</span>{{ tag.name
+              }}<button
+                class="remove"
+                :disabled="busy"
+                :aria-label="`Remove tag ${tag.name}`"
+                @click="removeTag(tag.id)"
+              >
+                <Icon name="x" :size="11" /></button
+            ></span>
+            <form class="tag-form" @submit.prevent="addTag">
+              <label for="tag-name" class="sr-only">Add a tag</label>
+              <input
+                id="tag-name"
+                v-model="tagName"
+                placeholder="Add tag"
+                required
+                maxlength="40"
+                autocomplete="off"
+              />
+            </form>
+          </div>
+        </section>
+        <section class="block">
+          <h2>Lists</h2>
+          <p v-if="!lists.length" class="muted small">
+            No lists yet. <Link href="/lists" class="link">Create one</Link>
+          </p>
+          <div v-else class="pills">
+            <button
+              v-for="list in lists"
+              :key="list.id"
+              type="button"
+              class="list-pill"
+              :aria-pressed="bookmark.listIds.includes(list.id)"
+              :disabled="busy"
+              @click="membership(list.id)"
+            >
+              <Icon v-if="bookmark.listIds.includes(list.id)" name="check" :size="13" />{{
+                list.name
+              }}
+            </button>
+          </div>
+        </section>
+        <footer class="actions">
+          <button class="ghost small" :disabled="busy" @click="reprocess">
+            <Icon name="refresh" :size="13" />Fetch again</button
+          ><button class="ghost small" :disabled="busy" @click="archive">
+            <Icon name="archive" :size="13" />{{
+              bookmark.archivedAt === null ? "Archive" : "Restore"
+            }}</button
+          ><button class="ghost small danger" :disabled="busy" @click="remove">Delete</button>
+        </footer>
+      </template>
+    </article>
+  </BookmarkLayout>
 </template>
 <style scoped>
 .detail {
@@ -439,12 +478,15 @@ function remove() {
 }
 .actions {
   display: flex;
-  justify-content: space-between;
+  gap: 1.5rem;
   margin-top: 3rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
 }
 .actions button {
   margin: 0 -0.65rem;
+}
+.actions .danger {
+  margin-left: auto;
 }
 </style>
