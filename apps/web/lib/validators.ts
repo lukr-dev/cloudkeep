@@ -46,12 +46,20 @@ export const createBookmark = z.union([
 ]);
 export const editBookmark = bookmarkInput
   .pick({ title: true, description: true })
-  .extend({ text: noteText.optional() })
+  .extend({ text: noteText.optional(), archived: z.boolean().optional() })
   .strict()
   .refine(
-    (v) => v.title !== undefined || v.description !== undefined || v.text !== undefined,
-    "Supply a title, description or text",
+    (v) =>
+      v.title !== undefined ||
+      v.description !== undefined ||
+      v.text !== undefined ||
+      v.archived !== undefined,
+    "Supply a title, description, text or archived flag",
   );
+export const archivedQuery = z
+  .enum(["1", "true", "0", "false"])
+  .optional()
+  .transform((value) => value === "1" || value === "true");
 export const listBody = createInsertSchema(lists, { name: z.string().trim().min(1).max(100) })
   .pick({ name: true })
   .strict();

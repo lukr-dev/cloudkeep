@@ -23,6 +23,7 @@ export type Bookmark = {
   summary: string | null;
   status: "pending" | "processing" | "done" | "failed";
   error: string | null;
+  archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };

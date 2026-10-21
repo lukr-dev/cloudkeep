@@ -1,7 +1,7 @@
 import { defineHandler } from "void";
 import { requireAuth } from "void/auth";
-import { db, eq, asc, sql } from "void/db";
-import { lists, bookmarkLists } from "../../../db/schema.ts";
+import { db, and, eq, asc, count, isNull } from "void/db";
+import { lists, bookmarkLists, bookmarks } from "../../../db/schema.ts";
 import { listBody, pagination } from "../../../lib/validators.ts";
 
 export const GET = defineHandler.withValidator({ query: pagination })(async (c, { query }) => ({
@@ -11,10 +11,20 @@ export const GET = defineHandler.withValidator({ query: pagination })(async (c, 
       name: lists.name,
       createdAt: lists.createdAt,
       updatedAt: lists.updatedAt,
-      count: sql<number>`(select count(*) from ${bookmarkLists} where ${bookmarkLists.listId} = ${lists.id})`,
+      count: count(bookmarks.id),
     })
     .from(lists)
+    .leftJoin(bookmarkLists, eq(bookmarkLists.listId, lists.id))
+    .leftJoin(
+      bookmarks,
+      and(
+        eq(bookmarks.id, bookmarkLists.bookmarkId),
+        eq(bookmarks.userId, lists.userId),
+        isNull(bookmarks.archivedAt),
+      ),
+    )
     .where(eq(lists.userId, requireAuth(c).id))
+    .groupBy(lists.id)
     .orderBy(asc(lists.name), asc(lists.id))
     .limit(query.limit)
     .offset(query.offset),

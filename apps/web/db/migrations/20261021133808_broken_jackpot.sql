@@ -1,0 +1,2 @@
+ALTER TABLE `bookmarks` ADD `archived_at` integer;--> statement-breakpoint
+CREATE INDEX `bookmarks_user_active_created` ON `bookmarks` (`user_id`,`created_at`,`id`) WHERE "bookmarks"."archived_at" is null;

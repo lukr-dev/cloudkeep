@@ -33,8 +33,11 @@ The Vue interface uses Void file-based pages and client navigation, with no UI f
 
 - `/setup`: first-run admin creation and automatic sign-in. Other screens redirect here until setup is complete.
 - `/login` and `/register?code=…`: password sign-in and invite registration, respectively. Sign-out is in the header.
-- `/`: save links, Markdown notes, or images/PDFs with an optional list, browse metadata, search/filter by `q`, `listId`, `tag`, and `type` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. Desktop lists/tags become select filters on mobile.
-- `/b/:id`: edit notes in the rich-text Markdown editor, view images, open/download PDFs, and edit title/description inline (Save appears when changed), read summaries, manage tags and list membership, open, reprocess, or delete a bookmark.
+- `/`: save links, Markdown notes, or images/PDFs with an optional list, browse metadata, search/filter by `q`, `listId`, `tag`, and `type` query parameters, and load more. Visible pending/processing bookmarks refresh every three seconds until settled. The desktop sidebar's type and list filters become select filters on mobile.
+- `/?archived=1`: archive view with the same search/list/tag/type filters. Archive or restore from a card or detail page; archiving keeps the bookmark and its memberships. Re-saving its URL restores it. Overview, list and tag counts include only active bookmarks.
+- Bookmark pages (`/`, the archive, `/tags`, and `/b/:id`) share a desktop sidebar for All bookmarks, Tags, Archive, type filters, and list counts; narrow screens hide it and the overview keeps its mobile filters. The detail Back button restores the previous in-app view, including filters, or falls back to `/`.
+- `/tags`: a tag cloud of tags used by active bookmarks (sized by bookmark count, log scale) with a client-side filter; each tag links to `/?tag=…`. Loaded in one aggregated query from `GET /api/tags/cloud`.
+- `/b/:id`: edit notes in the rich-text Markdown editor, view images, open/download PDFs, and edit title/description inline (Save appears when changed), read summaries, manage tags and list membership, open, archive/restore, reprocess, or delete a bookmark.
 - `/lists`: create, rename, and delete lists while keeping their bookmarks.
 - `/settings`: provider/model/reasoning effort, saved-key presence and clearing, connection testing using saved settings, automatic tagging/summaries, and prompt customization/reset.
 - `/admin/invites`: admin-only invitation creation with an expiry of 1, 7 or 30 days or none, one-time link copying, paginated history, and revocation.
@@ -135,6 +138,8 @@ The response includes `token` in JSON and `set-auth-token` in its headers. Send 
 
 All timestamps on application resources are integer Unix milliseconds. IDs are UUID strings. Nullable extracted fields are `null`. Requests containing JSON use `Content-Type: application/json`; no-body action examples below use `{}`. Unknown JSON body fields are rejected. JSON bodies are limited to 64 KiB before parsing, except bookmark create/edit (640 KiB to accommodate 100,000-character notes including JSON escaping). File uploads bypass JSON buffering. Query/param validation uses Void's Zod validators; invalid input returns `400 { error: "Validation failed", issues: [...] }`. Other errors use `{ error: string }`; unauthorized requests return 401, forbidden admin requests 403, foreign/missing resource IDs 404. JSON responses use `Cache-Control: no-store`; owner-only file responses use `private, no-cache`.
 
+Bookmark listings default to non-archived items; `archived=1` or `archived=true` lists only archived items, including in `total`. `PATCH /api/bookmarks/:id` also accepts `archived: boolean` on its own or alongside metadata edits. Archiving sets `archivedAt` to now; restoring clears it without marking title/description as edited. Re-saving a URL restores it. List/tag counts exclude archived bookmarks, and the tag cloud omits tags with no active bookmarks.
+
 `Pagination` means `?limit=20&offset=0` (limit 1–50, offset 0–100000). Bookmarks are ordered by `createdAt`/id descending, lists by name/id, tags by name. Re-saving a normalized URL for the same user bumps `createdAt` to now (or one millisecond past the collection maximum to break ties) and `updatedAt` to now. `createdAt` therefore represents the latest save, as in Karakeep; no extra sort column is needed. Offset pagination may shift when items are inserted, re-saved or deleted.
 
 ```ts
@@ -159,6 +164,7 @@ type Bookmark = {
   summary: string | null;
   status: "pending" | "processing" | "done" | "failed";
   error: string | null;
+  archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -204,10 +210,10 @@ type Settings = {
 | GET    | `/api/admin/invites`               | Admin; `?limit=50&offset=0` (max 100/10000)                                                                                                 | `{ items: Invite[], limit, offset }`                                                                           |
 | POST   | `/api/admin/invites`               | Admin `{ expiresAt?: number                                                                                                                 | null }` (future)                                                                                               | 201 `{ invite: Invite, code: string }`; code is shown only once |
 | DELETE | `/api/admin/invites/:id`           | Admin                                                                                                                                       | `{ ok: true }`; revokes without deleting history                                                               |
-| GET    | `/api/bookmarks`                   | Pagination; optional `listId`, `tag`, `q`, `type` (`link`, `text`, `asset`)                                                                 | `{ items: BookmarkListItem[], total, limit, offset }`                                                          |
+| GET    | `/api/bookmarks`                   | Pagination; optional `listId`, `tag`, `q`, `type` (`link`, `text`, `asset`), `archived` (`1`/`true`)                                        | `{ items: BookmarkListItem[], total, limit, offset }`                                                          |
 | POST   | `/api/bookmarks`                   | `{ url, title?, description?, listIds?, type?: "link" }` or `{ type: "text", text, title?, listIds? }`; nullable title/description          | 201 `{ bookmark: Bookmark, alreadyExists: false }`; 200 `{ bookmark: Bookmark, alreadyExists: true }`          |
 | GET    | `/api/bookmarks/:id`               | Owner                                                                                                                                       | `{ bookmark: BookmarkDetail }`                                                                                 |
-| PATCH  | `/api/bookmarks/:id`               | Owner `{ title?: string                                                                                                                     | null, description?: string                                                                                     | null, text?: string }`, at least one                            | `{ bookmark: Bookmark }` |
+| PATCH  | `/api/bookmarks/:id`               | Owner `{ title?: string                                                                                                                     | null, description?: string                                                                                     | null, text?: string, archived?: boolean }`, at least one        | `{ bookmark: Bookmark }` |
 | DELETE | `/api/bookmarks/:id`               | Owner                                                                                                                                       | `{ ok: true }`; cascades memberships/tags; files also delete R2 objects best-effort; keeps lists and tag names |
 | POST   | `/api/bookmarks/:id/reprocess`     | Owner `{}`                                                                                                                                  | 202 `{ bookmark: Bookmark }`; 503 with failed bookmark when enqueue fails                                      |
 | POST   | `/api/bookmarks/:id/tags`          | Owner `{ name: string }`                                                                                                                    | `{ tag: TagLink }`; promotes an AI tag to manual                                                               |
@@ -277,6 +283,6 @@ Overrides are 1–12,000 characters. Supported variables are `{{url}}`, `{{title
 
 ## Remaining work
 
-Build a mobile client against this contract. Measure deployed CPU and account quotas; verify real Workers AI and external-provider inference with owner credentials. Add key rotation and operational recovery/queue monitoring if needed. Add email delivery/verification/password-reset UX only when required; this phase has no email service. No admin role editor, import/export, archived content, full Readability scoring, or per-list prompts are implemented.
+Build a mobile client against this contract. Measure deployed CPU and account quotas; verify real Workers AI and external-provider inference with owner credentials. Add key rotation and operational recovery/queue monitoring if needed. Add email delivery/verification/password-reset UX only when required; this phase has no email service. No admin role editor, import/export, offline page snapshots, full Readability scoring, or per-list prompts are implemented.
 
 The current Void docs largely match the brief. Differences: init inside an existing workspace configures the app without a Vue picker (the documented `@void/vue` adapter was added manually); `--no-git` is rejected for workspace subpackages; Void already uses native scrypt; Queues now work on Free; unlinked local AI uses a Void proxy rather than the direct remote binding; env files other than `.env` are unsupported; and Better Auth tables/migrations are generated automatically and must not be duplicated in the app schema. `defineConfig` from `vite-plus` works with Void, so no lint-rule exception is needed.

@@ -29,6 +29,13 @@
       "when": 1792567474188,
       "tag": "20261021072434_common_sister_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792589888357,
+      "tag": "20261021133808_broken_jackpot",
+      "breakpoints": true
     }
   ]
 }

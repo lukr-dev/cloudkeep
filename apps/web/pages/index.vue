@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, 
 import { Link, useRouter } from "@void/vue";
 import BookmarkCard from "../components/BookmarkCard.vue";
 import Icon from "../components/Icon.vue";
+import BookmarkLayout from "../components/BookmarkLayout.vue";
 import {
   allItems,
   api,
@@ -12,7 +13,6 @@ import {
   type BookmarkItem,
   type List,
   type Page,
-  type Tag,
 } from "../lib/api.ts";
 import { filterQuery, filterUrl, readFilters } from "../lib/filters.ts";
 import { useFeatures } from "../composables/session.ts";
@@ -42,7 +42,6 @@ const router = useRouter();
 const filters = reactive(readFilters(router.query));
 const bookmarks = ref<BookmarkItem[]>([]);
 const lists = ref<List[]>([]);
-const tags = ref<Tag[]>([]);
 const total = ref(0);
 const loading = ref(true);
 const loadError = ref("");
@@ -55,10 +54,9 @@ let disposed = false;
 let controller: AbortController | undefined;
 const hasFilters = computed(() => !!(filters.q || filters.listId || filters.tag || filters.type));
 const activeList = computed(() => lists.value.find((list) => list.id === filters.listId));
-const usedTags = computed(() => tags.value.filter((tag) => tag.count));
 async function refreshCatalog() {
-  const result = await Promise.all([allItems<List>("/api/lists"), allItems<Tag>("/api/tags")]);
-  if (!disposed) [lists.value, tags.value] = result;
+  const result = await allItems<List>("/api/lists");
+  if (!disposed) lists.value = result;
   if (!features.value.files) {
     const assets = await api<Page<BookmarkItem> & { total: number }>(
       "/api/bookmarks?type=asset&limit=1",
@@ -158,6 +156,25 @@ async function add() {
       loadError.value = message(cause);
     });
 }
+function archive(id: string) {
+  const bookmark = bookmarks.value.find((item) => item.id === id);
+  if (!bookmark) return;
+  const archived = bookmark.archivedAt === null;
+  return run(async () => {
+    await api(`/api/bookmarks/${id}`, { method: "PATCH", body: { archived } });
+    if (bookmarks.value.some((item) => item.id === id)) {
+      // A pending poll must not put the removed card back.
+      ++request;
+      controller?.abort();
+      loading.value = false;
+      bookmarks.value = bookmarks.value.filter((item) => item.id !== id);
+      total.value--;
+      schedule();
+    }
+    notice.value = archived ? "Bookmark archived" : "Bookmark restored";
+    await refreshCatalog();
+  });
+}
 async function addFiles(files: File[]) {
   if (!features.value.files || busy.value || !files.length) return;
   mode.value = "asset";
@@ -232,7 +249,7 @@ onUnmounted(() => {
 </script>
 <template>
   <div class="page-head">
-    <h1>Bookmarks</h1>
+    <h1>{{ filters.archived ? "Archive" : "Bookmarks" }}</h1>
   </div>
   <div class="save-modes" role="group" aria-label="Bookmark type">
     <button
@@ -302,48 +319,7 @@ onUnmounted(() => {
     <Link :href="`/b/${duplicateId}`" class="link">Open</Link>
   </p>
   <p v-if="error" class="alert save-note" role="alert">{{ error }}</p>
-  <div class="collection">
-    <aside class="sidebar" aria-label="Filters">
-      <Link href="/" class="filter" :aria-current="!hasFilters ? 'page' : undefined"
-        ><span>All bookmarks</span></Link
-      >
-      <div class="sidebar-head"><h2>Type</h2></div>
-      <Link
-        v-for="option in typeOptions"
-        :key="option.value"
-        :href="filterUrl({ ...filters, type: option.value })"
-        class="filter"
-        :aria-current="filters.type === option.value ? 'page' : undefined"
-        >{{ option.label }}</Link
-      >
-      <div class="sidebar-head">
-        <h2>Lists</h2>
-        <Link href="/lists" class="sidebar-action" aria-label="Manage lists"
-          ><Icon name="plus" :size="14"
-        /></Link>
-      </div>
-      <p v-if="!lists.length" class="sidebar-empty">No lists yet</p>
-      <Link
-        v-for="list in lists"
-        :key="list.id"
-        :href="filterUrl({ ...filters, listId: filters.listId === list.id ? '' : list.id })"
-        :aria-current="filters.listId === list.id ? 'page' : undefined"
-        class="filter"
-        ><span class="break">{{ list.name }}</span
-        ><span class="count tabular">{{ list.count }}</span></Link
-      >
-      <div class="sidebar-head"><h2>Tags</h2></div>
-      <p v-if="!usedTags.length" class="sidebar-empty">Tags appear as links are tagged</p>
-      <Link
-        v-for="tag in usedTags"
-        :key="tag.id"
-        :href="filterUrl({ ...filters, tag: filters.tag === tag.name ? '' : tag.name })"
-        :aria-current="filters.tag === tag.name ? 'page' : undefined"
-        class="filter"
-        ><span class="break">{{ tag.name }}</span
-        ><span class="count tabular">{{ tag.count }}</span></Link
-      >
-    </aside>
+  <BookmarkLayout class="overview" :lists="lists" :filters="filters" :type-options="typeOptions">
     <section class="results" aria-label="Bookmarks" :aria-busy="loading">
       <form class="toolbar" role="search" @submit.prevent="apply">
         <div class="search">
@@ -378,17 +354,20 @@ onUnmounted(() => {
             <option value="">All lists</option>
             <option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option>
           </select>
-          <label for="filter-tag" class="sr-only">Tag</label
-          ><select id="filter-tag" v-model="filters.tag" @change="apply">
-            <option value="">All tags</option>
-            <option v-for="tag in usedTags" :key="tag.id" :value="tag.name">{{ tag.name }}</option>
-          </select>
+          <Link href="/tags" class="button">Tags</Link>
+          <Link
+            href="/?archived=1"
+            class="button"
+            :aria-current="filters.archived ? 'page' : undefined"
+            >Archive</Link
+          >
         </div>
         <button type="submit" class="sr-only">Search</button>
       </form>
       <div class="meta">
         <span class="muted small tabular"
-          >{{ total }} {{ total === 1 ? "bookmark" : "bookmarks" }}</span
+          >{{ total }} {{ filters.archived ? "archived " : ""
+          }}{{ total === 1 ? "bookmark" : "bookmarks" }}</span
         >
         <Link v-if="activeList" :href="filterUrl({ ...filters, listId: '' })" class="chip"
           >{{ activeList.name }}<Icon name="x" :size="12"
@@ -412,14 +391,24 @@ onUnmounted(() => {
         </div>
       </div>
       <div v-else-if="!bookmarks.length && !loadError" class="empty fade-in">
-        <h2>{{ hasFilters ? "No matches" : "No bookmarks yet" }}</h2>
+        <h2>
+          {{
+            filters.archived
+              ? "No archived bookmarks"
+              : hasFilters
+                ? "No matches"
+                : "No bookmarks yet"
+          }}
+        </h2>
         <p>
           {{
             hasFilters
               ? "Try a different search, or clear the filters."
-              : features.files
-                ? "Save a link, write a note, or drop a file above."
-                : "Save a link or write a note above."
+              : filters.archived
+                ? "Bookmarks you archive will appear here."
+                : features.files
+                  ? "Save a link, write a note, or drop a file above."
+                  : "Save a link or write a note above."
           }}
         </p>
       </div>
@@ -431,6 +420,7 @@ onUnmounted(() => {
           :filters="filters"
           :busy="busy"
           @retry="retry"
+          @archive="archive"
         />
       </div>
       <button
@@ -442,7 +432,7 @@ onUnmounted(() => {
         {{ loading ? "Loading…" : "Show more" }}
       </button>
     </section>
-  </div>
+  </BookmarkLayout>
 </template>
 <style scoped>
 .save-modes {
@@ -533,73 +523,8 @@ onUnmounted(() => {
   font-size: 0.88rem;
   color: var(--muted);
 }
-.collection {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 3rem;
+.overview {
   margin-top: 2.5rem;
-}
-.sidebar {
-  position: sticky;
-  top: 5.5rem;
-  align-self: start;
-  display: grid;
-  gap: 1px;
-}
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 1.5rem 0 0.35rem;
-  padding: 0 0.6rem;
-}
-.sidebar-head h2 {
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--faint);
-}
-.sidebar-action {
-  display: grid;
-  place-items: center;
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: 5px;
-  color: var(--faint);
-}
-.sidebar-action:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.sidebar-empty {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.84rem;
-  color: var(--faint);
-}
-.filter {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.9rem;
-  transition:
-    background-color 0.15s var(--ease),
-    color 0.15s var(--ease);
-}
-.filter:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.filter[aria-current] {
-  background: var(--subtle);
-  color: var(--text);
-  font-weight: 500;
-}
-.count {
-  color: var(--faint);
-  font-size: 0.82rem;
-  font-weight: 400;
 }
 .toolbar {
   display: flex;
@@ -685,13 +610,8 @@ onUnmounted(() => {
   margin: 1.5rem auto 0;
 }
 @media (max-width: 820px) {
-  .collection {
-    grid-template-columns: 1fr;
-    gap: 0;
+  .overview {
     margin-top: 1.75rem;
-  }
-  .sidebar {
-    display: none;
   }
   .toolbar {
     flex-wrap: wrap;
@@ -701,7 +621,7 @@ onUnmounted(() => {
   }
   .mobile-filters {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     flex-basis: 100%;
   }
 }

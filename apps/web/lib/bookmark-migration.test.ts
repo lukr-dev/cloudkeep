@@ -43,6 +43,7 @@ it("preserves bookmarks and all cascading memberships with foreign keys enabled"
         asset_mime: null,
         asset_name: null,
         asset_size: null,
+        archived_at: null,
       })),
     );
     expect(db.prepare("SELECT * FROM bookmark_lists ORDER BY bookmark_id, list_id").all()).toEqual(

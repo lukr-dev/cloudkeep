@@ -1,7 +1,58 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { allItems, api, ApiError } from "./api.ts";
 import { filterQuery, filterUrl, readFilters } from "./filters.ts";
+import { tagFontSize } from "./tag-cloud.ts";
+import { canGoBack, trackNavigation } from "./navigation.ts";
 afterEach(() => vi.unstubAllGlobals());
+describe("detail back navigation", () => {
+  it("marks client navigation without losing router state and restores the history method", () => {
+    const pushState = vi.fn();
+    const history = { pushState, length: 2, state: { cloudkeepBack: true } };
+    vi.stubGlobal("window", { history, location: { origin: "https://cloudkeep.test" } });
+    const stop = trackNavigation();
+    history.pushState({ __voidScrollKey: "next" }, "", "/b/bookmark");
+    expect(pushState).toHaveBeenCalledWith(
+      { __voidScrollKey: "next", cloudkeepBack: true },
+      "",
+      "/b/bookmark",
+    );
+    expect(canGoBack()).toBe(true);
+    stop();
+    history.pushState({ untouched: true }, "", "/");
+    expect(pushState).toHaveBeenLastCalledWith({ untouched: true }, "", "/");
+  });
+  it("uses same-origin document history and falls back for direct or external visits", () => {
+    const history = { length: 2, state: null };
+    vi.stubGlobal("window", { history, location: { origin: "https://cloudkeep.test" } });
+    for (const referrer of ["", "https://external.test/", "invalid"]) {
+      vi.stubGlobal("document", { referrer });
+      expect(canGoBack()).toBe(false);
+    }
+    vi.stubGlobal("document", { referrer: "https://cloudkeep.test/?tag=design&archived=1" });
+    expect(canGoBack()).toBe(true);
+    history.length = 1;
+    expect(canGoBack()).toBe(false);
+  });
+});
+describe("tag cloud sizing", () => {
+  it("scales counts logarithmically from 0.8rem to 2rem", () => {
+    expect(tagFontSize(1, 100)).toBe(0.8);
+    expect(tagFontSize(10, 100)).toBeCloseTo(1.4);
+    expect(tagFontSize(100, 100)).toBe(2);
+    expect(tagFontSize(2, 100)).toBeGreaterThan(tagFontSize(1, 100));
+    expect(tagFontSize(10, 100) - tagFontSize(1, 100)).toBeCloseTo(
+      tagFontSize(100, 100) - tagFontSize(10, 100),
+    );
+  });
+  it("handles empty clouds, single bookmarks and out-of-range counts", () => {
+    expect(tagFontSize(0, 0)).toBe(0.8);
+    expect(tagFontSize(1, 1)).toBe(0.8);
+    expect(tagFontSize(5, 5)).toBe(2);
+    expect(tagFontSize(0, 100)).toBe(0.8);
+    expect(tagFontSize(-1, 100)).toBe(0.8);
+    expect(tagFontSize(200, 100)).toBe(2);
+  });
+});
 describe("JSON API client", () => {
   it("sends JSON with the session cookie and returns typed data", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ ok: true }));
@@ -75,26 +126,44 @@ describe("JSON API client", () => {
   });
 });
 describe("bookmark filters", () => {
+  it("round trips archive filters and preserves the archive when changing tags or lists", () => {
+    const filters = { type: "", q: "vue", listId: "list-1", tag: "web", archived: true };
+    expect(readFilters(filterQuery(filters))).toEqual(filters);
+    expect(filterUrl({ ...filters, tag: "cloud" })).toBe(
+      "/?q=vue&listId=list-1&tag=cloud&archived=1",
+    );
+    expect(filterUrl({ ...filters, listId: "", q: "", tag: "" })).toBe("/?archived=1");
+    expect(filterUrl({ ...filters, archived: false })).not.toContain("archived");
+  });
+  it("reads only true or 1 as the archive flag", () => {
+    for (const value of ["1", "true"])
+      expect(readFilters(new URLSearchParams({ archived: value })).archived).toBe(true);
+    for (const value of ["0", "false", "", "invalid"])
+      expect(readFilters(new URLSearchParams({ archived: value })).archived).toBe(false);
+  });
   it("round trips search, list and tag including spaces and reserved characters", () => {
-    const filters = { type: "", q: "Vue & Workers", listId: "list-1", tag: "c++" };
+    const filters = { type: "", q: "Vue & Workers", listId: "list-1", tag: "c++", archived: false };
     expect(readFilters(filterQuery(filters))).toEqual(filters);
     expect(filterUrl(filters)).toBe("/?q=Vue+%26+Workers&listId=list-1&tag=c%2B%2B");
   });
   it("omits empty filters, trims values and ignores unrelated params", () => {
-    expect(filterUrl({ type: "", q: "  ", listId: "", tag: "" })).toBe("/");
-    expect(filterUrl({ type: "", q: " vue ", listId: "", tag: "" })).toBe("/?q=vue");
+    expect(filterUrl({ type: "", q: "  ", listId: "", tag: "", archived: false })).toBe("/");
+    expect(filterUrl({ type: "", q: " vue ", listId: "", tag: "", archived: false })).toBe(
+      "/?q=vue",
+    );
     expect(readFilters(new URLSearchParams("offset=20&other=x"))).toEqual({
       type: "",
       q: "",
       listId: "",
       tag: "",
+      archived: false,
     });
   });
 });
 
 it("round trips bookmark type filters and ignores unsupported types", () => {
   for (const type of ["link", "text", "asset"]) {
-    const filters = { type, q: "", listId: "", tag: "" };
+    const filters = { type, q: "", listId: "", tag: "", archived: false };
     expect(readFilters(filterQuery(filters))).toEqual(filters);
     expect(filterUrl(filters)).toBe(`/?type=${type}`);
   }
