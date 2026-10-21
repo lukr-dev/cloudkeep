@@ -1,4 +1,4 @@
-export type Features = { files: boolean };
+export type Features = { files: boolean; audio: boolean };
 export type Me = { user: User; features: Features };
 export type User = { id: string; name: string; email: string; role: "admin" | "user" };
 export type TagLink = { id: string; name: string; source: "manual" | "ai" };
@@ -21,13 +21,29 @@ export type Bookmark = {
   siteName: string | null;
   contentText: string | null;
   summary: string | null;
+  contentTruncated: boolean;
+  hasAudio?: boolean;
+  processingListId: string | null;
   status: "pending" | "processing" | "done" | "failed";
   error: string | null;
   archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };
-export type BookmarkDetail = Bookmark & { tags: TagLink[]; listIds: string[] };
+export type Audio = {
+  kind: "short" | "full";
+  status: "pending" | "processing" | "done" | "failed";
+  error: string | null;
+  text: string | null;
+  hasAudio: boolean;
+  url: string | null;
+};
+export type BookmarkDetail = Bookmark & {
+  tags: TagLink[];
+  listIds: string[];
+  audioEnabled: boolean;
+  audio: Audio[];
+};
 export type BookmarkItem = Omit<BookmarkDetail, "contentText" | "noteText"> & {
   excerpt: string | null;
 };
@@ -53,6 +69,10 @@ export type Settings = {
   provider: Provider | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  ttsProvider: Provider | null;
+  ttsModel: string | null;
+  ttsVoice: string | null;
+  defaultTts: Record<Provider, { model: string; voice: string }>;
   autoTag: boolean;
   autoSummary: boolean;
   keys: Record<"openai" | "openrouter", { hasKey: boolean }>;
@@ -60,7 +80,9 @@ export type Settings = {
   defaultReasoningEffort: Record<Provider, ReasoningEffort | null>;
 };
 export type Prompt = { template: string; defaultTemplate: string; isDefault: boolean };
-export type Prompts = Record<"tagging" | "summary", Prompt> & { variables: string[] };
+export type Prompts = Record<"tagging" | "summary" | "detailed_summary", Prompt> & {
+  variables: string[];
+};
 export type Page<T> = { items: T[]; limit: number; offset: number };
 export class ApiError extends Error {
   constructor(
@@ -157,3 +179,14 @@ export function uploadFile(
     request.send(file);
   });
 }
+
+export type ListSettings = List & {
+  provider: Provider | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+  audioEnabled: boolean;
+  ttsProvider: Provider | null;
+  ttsModel: string | null;
+  ttsVoice: string | null;
+};
+export type ListConfiguration = { list: ListSettings; prompts: Prompts };

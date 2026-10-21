@@ -11,6 +11,9 @@ export const profiles = sqliteTable("profiles", {
   reasoningEffort: text("reasoning_effort", { enum: ["none", "low", "medium", "high"] }),
   openaiKey: text("openai_key"),
   openrouterKey: text("openrouter_key"),
+  ttsProvider: text("tts_provider", { enum: ["workers-ai", "openrouter", "openai"] }),
+  ttsModel: text("tts_model"),
+  ttsVoice: text("tts_voice"),
   autoTag: integer("auto_tag", { mode: "boolean" }).notNull().default(true),
   autoSummary: integer("auto_summary", { mode: "boolean" }).notNull().default(false),
 });
@@ -54,6 +57,10 @@ export const bookmarks = sqliteTable(
     siteName: text("site_name"),
     contentText: text("content_text"),
     summary: text("summary"),
+    contentTruncated: integer("content_truncated", { mode: "boolean" }).notNull().default(false),
+    processingListId: text("processing_list_id").references(() => lists.id, {
+      onDelete: "set null",
+    }),
     status: text("status", { enum: ["pending", "processing", "done", "failed"] })
       .notNull()
       .default("pending"),
@@ -82,6 +89,13 @@ export const lists = sqliteTable(
       .notNull()
       .references(() => profiles.userId, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    provider: text("provider", { enum: ["workers-ai", "openrouter", "openai"] }),
+    model: text("model"),
+    reasoningEffort: text("reasoning_effort", { enum: ["none", "low", "medium", "high"] }),
+    audioEnabled: integer("audio_enabled", { mode: "boolean" }).notNull().default(false),
+    ttsProvider: text("tts_provider", { enum: ["workers-ai", "openrouter", "openai"] }),
+    ttsModel: text("tts_model"),
+    ttsVoice: text("tts_voice"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -134,7 +148,7 @@ export const prompts = sqliteTable(
       .notNull()
       .references(() => profiles.userId, { onDelete: "cascade" }),
     listId: text("list_id").references(() => lists.id, { onDelete: "cascade" }),
-    kind: text("kind", { enum: ["tagging", "summary"] }).notNull(),
+    kind: text("kind", { enum: ["tagging", "summary", "detailed_summary"] }).notNull(),
     template: text("template").notNull(),
   },
   (t) => [
@@ -145,4 +159,26 @@ export const prompts = sqliteTable(
       .on(t.userId, t.listId, t.kind)
       .where(sql`${t.listId} is not null`),
   ],
+);
+
+export const bookmarkAudio = sqliteTable(
+  "bookmark_audio",
+  {
+    bookmarkId: text("bookmark_id")
+      .notNull()
+      .references(() => bookmarks.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["short", "full"] }).notNull(),
+    runId: text("run_id").notNull(),
+    r2Key: text("r2_key"),
+    text: text("text"),
+    provider: text("provider", { enum: ["workers-ai", "openrouter", "openai"] }),
+    model: text("model"),
+    voice: text("voice"),
+    status: text("status", { enum: ["pending", "processing", "done", "failed"] }).notNull(),
+    error: text("error"),
+    size: integer("size"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.bookmarkId, t.kind] })],
 );

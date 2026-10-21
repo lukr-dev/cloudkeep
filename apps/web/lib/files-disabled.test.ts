@@ -38,7 +38,10 @@ vi.mock("void/storage", () => ({
 }));
 vi.mock("void/db", async (original) => ({
   ...(await original<typeof import("void/db")>()),
-  db: { delete: () => ({ where: mocks.deleteRow }) },
+  db: {
+    delete: () => ({ where: mocks.deleteRow }),
+    select: () => ({ from: () => ({ where: async () => [] }) }),
+  },
 }));
 vi.mock("./http.ts", async (original) => ({
   ...(await original<typeof import("./http.ts")>()),

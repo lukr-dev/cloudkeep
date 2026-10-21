@@ -1,3 +1,6 @@
+import { processingList } from "./processing-list.ts";
+import { listProfile } from "./list-settings.ts";
+import { prepareAudio, processAudio } from "./audio.ts";
 import { filesEnabled, FILES_DISABLED_MESSAGE } from "./assets.ts";
 import { ai } from "void/ai";
 import { storage } from "void/storage";
@@ -63,12 +66,21 @@ export async function processBookmark(job: ProcessMessage) {
       })
       .where(where);
     const [profile] = await db.select().from(profiles).where(eq(profiles.userId, job.userId));
+    const list = await processingList(job.userId, bookmark.processingListId);
+    const effective = profile ? listProfile(profile, list) : undefined;
+    const audioEnabled = filesEnabled() && !!list?.audioEnabled;
     if (
-      profile?.provider &&
-      (profile.provider === "workers-ai" ||
-        (profile.provider === "openai" ? profile.openaiKey : profile.openrouterKey))
+      list?.provider &&
+      list.provider !== "workers-ai" &&
+      !(list.provider === "openai" ? profile?.openaiKey : profile?.openrouterKey)
+    )
+      throw new Error("Set an API key for the selected list provider");
+    if (
+      effective?.provider &&
+      (effective.provider === "workers-ai" ||
+        (effective.provider === "openai" ? effective.openaiKey : effective.openrouterKey))
     ) {
-      const templates = await effectivePrompts(job.userId);
+      const templates = await effectivePrompts(job.userId, list?.id);
       const existingTags = await db
         .select({ name: tags.name })
         .from(tags)
@@ -84,9 +96,9 @@ export async function processBookmark(job: ProcessMessage) {
         existing_tags: JSON.stringify(existingTags.map((t) => t.name)),
         language: "English",
       };
-      if (profile.autoTag) {
+      if (effective.autoTag) {
         const names = parseTags(
-          await complete(profile, renderPrompt(templates.tagging.template, variables)),
+          await complete(effective, renderPrompt(templates.tagging.template, variables)),
         );
         await db
           .delete(bookmarkTags)
@@ -99,14 +111,21 @@ export async function processBookmark(job: ProcessMessage) {
           );
         for (const name of names) await linkTag(job.userId, job.bookmarkId, name, "ai", job.runId);
       }
-      if (profile.autoSummary) {
+      if (effective.autoSummary) {
         const summary = (
-          await complete(profile, renderPrompt(templates.summary.template, variables))
+          await complete(effective, renderPrompt(templates.summary.template, variables))
         )
           .trim()
           .slice(0, 4_000);
         if (!summary) throw new Error("AI returned an empty summary");
         await db.update(bookmarks).set({ summary }).where(where);
+      }
+    }
+    if (audioEnabled) {
+      const [current] = await db.select().from(bookmarks).where(where);
+      if (current) {
+        const audio = await prepareAudio(job.bookmarkId, "short");
+        if (audio) await processAudio({ type: "audio", ...job, kind: "short", runId: audio.runId });
       }
     }
     await db

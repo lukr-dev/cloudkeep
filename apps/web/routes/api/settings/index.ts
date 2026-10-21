@@ -4,6 +4,8 @@ import { env } from "void/env";
 import { z } from "zod";
 import { profiles } from "../../../db/schema.ts";
 import { profileFor } from "../../../lib/http.ts";
+import { filesEnabled, FILES_DISABLED_MESSAGE } from "../../../lib/assets.ts";
+import { fail } from "../../../lib/http.ts";
 import { publicSettings } from "../../../lib/settings.ts";
 import {
   DEFAULT_REASONING_EFFORT,
@@ -19,6 +21,9 @@ export const PATCH = defineHandler.withValidator({
       provider: providerSchema.nullable().optional(),
       model: z.string().trim().min(1).max(200).nullable().optional(),
       reasoningEffort: reasoningEffortSchema.nullable().optional(),
+      ttsProvider: providerSchema.nullable().optional(),
+      ttsModel: z.string().trim().min(1).max(200).nullable().optional(),
+      ttsVoice: z.string().trim().min(1).max(200).nullable().optional(),
       autoTag: z.boolean().optional(),
       autoSummary: z.boolean().optional(),
       keys: z
@@ -31,6 +36,11 @@ export const PATCH = defineHandler.withValidator({
     })
     .strict(),
 })(async (c, { body }) => {
+  if (
+    !filesEnabled() &&
+    (body.ttsProvider !== undefined || body.ttsModel !== undefined || body.ttsVoice !== undefined)
+  )
+    return fail(503, FILES_DISABLED_MESSAGE);
   const profile = await profileFor(c);
   const { keys, ...settings } = body;
   const changes: Partial<typeof profiles.$inferInsert> = { ...settings };
@@ -42,6 +52,10 @@ export const PATCH = defineHandler.withValidator({
     body.reasoningEffort === undefined
   )
     changes.reasoningEffort = body.provider ? DEFAULT_REASONING_EFFORT[body.provider] : null;
+  if (body.ttsProvider !== undefined && body.ttsProvider !== profile.ttsProvider) {
+    if (body.ttsModel === undefined) changes.ttsModel = null;
+    if (body.ttsVoice === undefined) changes.ttsVoice = null;
+  }
   for (const provider of ["openai", "openrouter"] as const) {
     const value = keys?.[provider];
     if (value !== undefined)

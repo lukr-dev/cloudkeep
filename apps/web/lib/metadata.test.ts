@@ -65,7 +65,8 @@ it("uses OpenGraph ahead of Twitter/title and resolves relative assets", async (
     imageUrl: "https://example.com/image.jpg",
     faviconUrl: "https://example.com/icon.png",
     siteName: "Example",
-    contentText: "Hello Readable page.",
+    contentText: "Hello\n\nReadable page.",
+    contentTruncated: false,
   });
 });
 it("supports Twitter and ordinary HTML fallbacks and caps text", async () => {
@@ -80,6 +81,7 @@ it("supports Twitter and ordinary HTML fallbacks and caps text", async () => {
   expect(result.title).toBe("Plain title");
   expect(result.description).toBe("Plain description");
   expect(result.contentText).toHaveLength(20_000);
+  expect(result.contentTruncated).toBe(true);
   expect(result.faviconUrl).toBe("https://example.com/favicon.ico");
 });
 it("rejects oversized streams and private redirects before fetching a second target", async () => {
@@ -96,7 +98,7 @@ it("decodes entities and handles hidden void elements without hiding the rest of
     "<title>Tom &amp; Jerry</title><body><input hidden><p>A &amp; B &#169; &#x1F600;</p><div hidden>secret</div><p>Visible</p></body>",
   );
   expect(result.title).toBe("Tom & Jerry");
-  expect(result.contentText).toBe("A & B © 😀 Visible");
+  expect(result.contentText).toBe("A & B © 😀\n\nVisible");
 });
 it("decodes raw attribute values exactly once", async () => {
   const result = await extract(
@@ -105,4 +107,14 @@ it("decodes raw attribute values exactly once", async () => {
   expect(result.title).toBe("A &amp; B");
   expect(result.description).toBe("A & B");
   expect(result.imageUrl).toBe("https://example.com/x?a=1&b=2");
+});
+
+it("preserves paragraph boundaries at both ends of blocks and collapses source whitespace", async () => {
+  const result = await extract(
+    "<body><article><p>One   <em>inline</em> sentence.</p>Between<div>Second\n line.</div><p>Third<br>Fourth</p><aside hidden><p>Hidden</p></aside></article></body>",
+  );
+  expect(result.contentText).toBe(
+    "One inline sentence.\n\nBetween\n\nSecond line.\n\nThird\n\nFourth",
+  );
+  expect(result.contentTruncated).toBe(false);
 });

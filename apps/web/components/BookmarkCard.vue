@@ -78,6 +78,13 @@ const age = computed(() => {
         />
         <span class="break">{{ bookmark.siteName || domain }}</span>
         <span aria-hidden="true">·</span>
+        <span
+          v-if="bookmark.hasAudio"
+          role="img"
+          aria-label="Audio available"
+          title="Audio available"
+          >🎧</span
+        >
         <time :datetime="new Date(bookmark.createdAt).toISOString()">{{ age }}</time>
       </div>
       <h2 class="title">
