@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Link } from "@void/vue";
+import BookmarkLayout from "../components/BookmarkLayout.vue";
 import { api, type Tag } from "../lib/api.ts";
 import { filterUrl } from "../lib/filters.ts";
 import { tagFontSize } from "../lib/tag-cloud.ts";
@@ -21,50 +22,51 @@ async function load() {
 onMounted(() => void run(load));
 </script>
 <template>
-  <div class="page-head">
-    <div>
-      <h1>
-        Tags <span v-if="loaded" class="muted small tabular">{{ tags.length }}</span>
-      </h1>
-      <p>Explore bookmarks by tag.</p>
+  <BookmarkLayout>
+    <div class="page-head">
+      <div>
+        <h1>
+          Tags <span v-if="loaded" class="muted small tabular">{{ tags.length }}</span>
+        </h1>
+        <p>Explore bookmarks by tag.</p>
+      </div>
     </div>
-    <Link href="/" class="link small">Back to bookmarks</Link>
-  </div>
-  <div class="tag-search field">
-    <label for="tag-search" class="sr-only">Filter tags</label>
-    <input id="tag-search" v-model="query" type="search" placeholder="Filter tags" />
-  </div>
-  <section aria-label="Tags" :aria-busy="busy || (!loaded && !error)">
-    <div v-if="error" class="alert" role="alert">
-      <span>{{ error }}</span
-      ><button :disabled="busy" @click="run(load)">Try again</button>
+    <div class="tag-search field">
+      <label for="tag-search" class="sr-only">Filter tags</label>
+      <input id="tag-search" v-model="query" type="search" placeholder="Filter tags" />
     </div>
-    <div v-else-if="!loaded" class="cloud" aria-hidden="true">
-      <div v-for="n in 12" :key="n" class="skeleton placeholder"></div>
-    </div>
-    <div v-else-if="!tags.length" class="empty fade-in">
-      <h2>No tags yet</h2>
-      <p>Tags appear as bookmarks are tagged.</p>
-    </div>
-    <div v-else-if="!visibleTags.length" class="empty fade-in" role="status">
-      <h2>No matching tags</h2>
-      <p>Try a different filter.</p>
-    </div>
-    <ul v-else class="cloud fade-in">
-      <li v-for="tag in visibleTags" :key="tag.id">
-        <Link
-          :href="filterUrl({ q: '', listId: '', tag: tag.name })"
-          :style="{ fontSize: `${tagFontSize(tag.count, maxCount)}rem` }"
-          :title="`${tag.count} ${tag.count === 1 ? 'bookmark' : 'bookmarks'}`"
-          class="cloud-tag break"
-          >{{ tag.name
-          }}<span class="sr-only"
-            >, {{ tag.count }} {{ tag.count === 1 ? "bookmark" : "bookmarks" }}</span
-          ></Link
-        >
-      </li>
-    </ul>
-  </section>
+    <section aria-label="Tags" :aria-busy="busy || (!loaded && !error)">
+      <div v-if="error" class="alert" role="alert">
+        <span>{{ error }}</span
+        ><button :disabled="busy" @click="run(load)">Try again</button>
+      </div>
+      <div v-else-if="!loaded" class="cloud" aria-hidden="true">
+        <div v-for="n in 12" :key="n" class="skeleton placeholder"></div>
+      </div>
+      <div v-else-if="!tags.length" class="empty fade-in">
+        <h2>No tags yet</h2>
+        <p>Tags appear as bookmarks are tagged.</p>
+      </div>
+      <div v-else-if="!visibleTags.length" class="empty fade-in" role="status">
+        <h2>No matching tags</h2>
+        <p>Try a different filter.</p>
+      </div>
+      <ul v-else class="cloud fade-in">
+        <li v-for="tag in visibleTags" :key="tag.id">
+          <Link
+            :href="filterUrl({ archived: false, q: '', listId: '', tag: tag.name })"
+            :style="{ fontSize: `${tagFontSize(tag.count, maxCount)}rem` }"
+            :title="`${tag.count} ${tag.count === 1 ? 'bookmark' : 'bookmarks'}`"
+            class="cloud-tag break"
+            >{{ tag.name
+            }}<span class="sr-only"
+              >, {{ tag.count }} {{ tag.count === 1 ? "bookmark" : "bookmarks" }}</span
+            ></Link
+          >
+        </li>
+      </ul>
+    </section>
+  </BookmarkLayout>
 </template>
 <style scoped>
 .tag-search {

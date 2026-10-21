@@ -86,9 +86,11 @@ function remove(list: List) {
           ><button class="primary small" :disabled="busy">Save</button>
         </form>
         <template v-else>
-          <Link :href="filterUrl({ q: '', tag: '', listId: list.id })" class="name break">{{
-            list.name
-          }}</Link>
+          <Link
+            :href="filterUrl({ archived: false, q: '', tag: '', listId: list.id })"
+            class="name break"
+            >{{ list.name }}</Link
+          >
           <span class="count tabular">{{ list.count }}</span>
           <div class="actions">
             <button

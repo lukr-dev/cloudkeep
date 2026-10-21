@@ -53,12 +53,16 @@ export const bookmarks = sqliteTable(
     // Keep user edits when metadata is refreshed.
     titleEdited: integer("title_edited", { mode: "boolean" }).notNull().default(false),
     descriptionEdited: integer("description_edited", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
     uniqueIndex("bookmarks_user_url").on(t.userId, t.url),
     index("bookmarks_user_created").on(t.userId, t.createdAt, t.id),
+    index("bookmarks_user_active_created")
+      .on(t.userId, t.createdAt, t.id)
+      .where(sql`${t.archivedAt} is null`),
   ],
 );
 export const lists = sqliteTable(
