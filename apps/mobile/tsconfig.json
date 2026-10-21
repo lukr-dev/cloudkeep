@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["vue-lynx/types", "@lynx-js/types", "node"]
+  },
+  "vueCompilerOptions": { "plugins": ["vue-lynx/types/volar-plugin"] },
+  "include": ["src/**/*.ts", "src/**/*.vue", "lynx.config.ts", "vite.config.ts"]
+}

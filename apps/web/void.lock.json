@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "source": {
+    "name": "cloudkeep",
+    "r2_buckets": []
+  },
+  "resolved": {
+    "name": "cloudkeep",
+    "account_id": "7979b4f7816680c8ba9be80700d1abe4",
+    "compatibility_date": "2026-02-24",
+    "routes": [
+      {
+        "pattern": "cloudkeep.toastnet.work",
+        "custom_domain": true
+      }
+    ],
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "cloudkeep-db",
+        "database_id": "e8829186-8446-4401-a705-174a6a5de7dd",
+        "migrations_dir": "./db/migrations"
+      }
+    ],
+    "r2_buckets": []
+  },
+  "text": "{\n  \"name\": \"cloudkeep\",\n  \"account_id\": \"7979b4f7816680c8ba9be80700d1abe4\",\n  \"compatibility_date\": \"2026-02-24\",\n  \"routes\": [\n    {\n      \"pattern\": \"cloudkeep.toastnet.work\",\n      \"custom_domain\": true\n    }\n  ],\n  \"d1_databases\": [\n    {\n      \"binding\": \"DB\",\n      \"database_name\": \"cloudkeep-db\",\n      \"database_id\": \"e8829186-8446-4401-a705-174a6a5de7dd\",\n      \"migrations_dir\": \"./db/migrations\"\n    }\n  ],\n  \"r2_buckets\": []\n}\n"
+}
