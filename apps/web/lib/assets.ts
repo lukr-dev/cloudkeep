@@ -1,13 +1,8 @@
+import { storage } from "void/storage";
 import { z } from "zod";
 
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const ASSET_MIMES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-] as const;
+import { ASSET_MIMES, MAX_UPLOAD_BYTES } from "./file-types.ts";
+export { ASSET_MIMES, MAX_UPLOAD_BYTES } from "./file-types.ts";
 export const assetMimeSchema = z.enum(ASSET_MIMES);
 export const uploadLengthSchema = z
   .string()
@@ -15,19 +10,26 @@ export const uploadLengthSchema = z
   .transform(Number)
   .pipe(z.number().int().min(1).max(MAX_UPLOAD_BYTES));
 
+export const FILES_DISABLED_MESSAGE = "File uploads are disabled on this server";
+export function filesEnabled(): boolean {
+  try {
+    return typeof storage.put === "function";
+  } catch {
+    return false;
+  }
+}
+
 export function sanitizeFilename(encoded: string): string {
   const decoded = decodeURIComponent(encoded);
-  return (
-    decoded
-      .replace(/\\/g, "/")
-      .split("/")
-      .pop()!
-      // oxlint-disable-next-line no-control-regex -- Remove header/control characters from untrusted filenames.
-      .replace(/[\u0000-\u001f\u007f-\u009f"<>:|?*\u202a-\u202e\u2066-\u2069]/g, "")
-      .replace(/^\.+/, "")
-      .trim()
-      .slice(0, 180) || "Untitled file"
-  );
+  const clean = decoded
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop()!
+    // oxlint-disable-next-line no-control-regex -- Remove header/control characters from untrusted filenames.
+    .replace(/[\u0000-\u001f\u007f-\u009f"<>:|?*\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(/^\.+/, "")
+    .trim();
+  return Array.from(clean).slice(0, 180).join("") || "Untitled file";
 }
 export function matchesMagic(bytes: Uint8Array, mime: string): boolean {
   const starts = (...prefix: number[]) => prefix.every((byte, i) => bytes[i] === byte);

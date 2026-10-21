@@ -1,5 +1,8 @@
+import { withRuntimeEnv } from "void/_env";
+import { storage } from "void/storage";
 import { expect, it } from "vite-plus/test";
 import {
+  filesEnabled,
   assetMimeSchema,
   uploadLengthSchema,
   MAX_UPLOAD_BYTES,
@@ -47,6 +50,8 @@ it("decodes and sanitizes filenames and safely encodes download headers", () => 
   expect(sanitizeFilename("%00%0D%0A")).toBe("Untitled file");
   expect(sanitizeFilename("a".repeat(500))).toHaveLength(180);
   expect(() => sanitizeFilename("%oops")).toThrow();
+  const unicodeName = sanitizeFilename(encodeURIComponent("a" + "😀".repeat(180)));
+  expect(() => fileDisposition(unicodeName, true)).not.toThrow();
   const disposition = fileDisposition('résumé"\r\n.pdf', true);
   expect(disposition).toContain("attachment;");
   expect(disposition).not.toMatch(/[\r\n]/);
@@ -61,4 +66,13 @@ it("strips common Markdown and HTML syntax and bounds excerpts", () => {
   expect(markdownExcerpt("<b>hello</b> ![photo](image.png)")).toBe("hello photo");
   expect(markdownExcerpt(null)).toBe("");
   expect(markdownExcerpt("a".repeat(100_000))).toHaveLength(300);
+});
+
+it("detects the actual storage binding and never throws when Void has no binding", () => {
+  expect(withRuntimeEnv({}, filesEnabled)).toBe(false);
+  expect(() => withRuntimeEnv({}, () => typeof storage.put)).toThrow(
+    "env: Missing Cloudflare binding 'STORAGE'.",
+  );
+  expect(withRuntimeEnv({ STORAGE: { put: () => {} } }, filesEnabled)).toBe(true);
+  expect(withRuntimeEnv({ STORAGE: null }, filesEnabled)).toBe(false);
 });

@@ -1,3 +1,4 @@
+import { filesEnabled } from "../../../../lib/assets.ts";
 import { enqueue } from "../../../../lib/enqueue.ts";
 import { storage } from "void/storage";
 import { defineHandler } from "void";
@@ -62,6 +63,6 @@ export const DELETE = defineHandler.withValidator({ params: idParams })(async (c
   const userId = requireAuth(c).id;
   const existing = await ownBookmark(userId, params.id);
   await db.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.id, params.id)));
-  if (existing.assetKey) await storage.delete(existing.assetKey).catch(() => {});
+  if (existing.assetKey && filesEnabled()) await storage.delete(existing.assetKey).catch(() => {});
   return { ok: true };
 });

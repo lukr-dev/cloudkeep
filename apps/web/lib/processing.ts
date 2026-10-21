@@ -1,3 +1,4 @@
+import { filesEnabled, FILES_DISABLED_MESSAGE } from "./assets.ts";
 import { ai } from "void/ai";
 import { storage } from "void/storage";
 import { db, and, eq, sql } from "void/db";
@@ -21,7 +22,11 @@ export async function processBookmark(job: ProcessMessage) {
     .returning();
   if (!bookmark) return;
   try {
-    let content = bookmark.noteText ?? bookmark.contentText ?? "";
+    if (bookmark.type === "asset" && !filesEnabled()) throw new Error(FILES_DISABLED_MESSAGE);
+    let content =
+      bookmark.type === "asset"
+        ? bookmark.contentText || bookmark.assetName || ""
+        : (bookmark.noteText ?? bookmark.contentText ?? "");
     if (bookmark.type === "asset" && bookmark.assetKey) {
       try {
         const object = await storage.get(bookmark.assetKey);
@@ -32,7 +37,7 @@ export async function processBookmark(job: ProcessMessage) {
               type: bookmark.assetMime ?? "application/octet-stream",
             }),
           });
-          if (result.format !== "error" && typeof result.data === "string")
+          if (result.format !== "error" && typeof result.data === "string" && result.data.trim())
             content = result.data.slice(0, MAX_CONTENT_CHARS);
         }
       } catch {
@@ -112,9 +117,10 @@ export async function processBookmark(job: ProcessMessage) {
     // Only controlled messages go to the API; SDK errors may include secrets.
     const message =
       error instanceof Error &&
-      /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
-        error.message,
-      )
+      (error.message === FILES_DISABLED_MESSAGE ||
+        /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
+          error.message,
+        ))
         ? error.message
         : "Couldn’t process this bookmark. Check your AI settings, then retry.";
     await db

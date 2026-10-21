@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vite-plus/test";
 import { Hono, type Handler } from "hono";
 import { HTTPException } from "hono/http-exception";
 const mocks = vi.hoisted(() => ({
+  enabled: true,
   put: vi.fn(),
   get: vi.fn(),
   delete: vi.fn(),
@@ -12,7 +13,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("void", () => ({ defineHandler: (handler: unknown) => handler }));
 vi.mock("void/auth", () => ({ requireAuth: () => ({ id: "owner" }) }));
 vi.mock("void/storage", () => ({
-  storage: { put: mocks.put, get: mocks.get, delete: mocks.delete },
+  storage: new Proxy(
+    { put: mocks.put, get: mocks.get, delete: mocks.delete },
+    {
+      get(target, prop) {
+        if (!mocks.enabled) throw new Error("env: Missing Cloudflare binding 'STORAGE'.");
+        return Reflect.get(target, prop);
+      },
+    },
+  ),
 }));
 vi.mock("void/db", async (original) => ({
   ...(await original<typeof import("void/db")>()),
@@ -45,6 +54,7 @@ function upload(headers: Record<string, string> = {}, query = "") {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.enabled = true;
   mocks.owned = [];
   mocks.put.mockResolvedValue({ size: 12 });
   mocks.get.mockResolvedValue({
@@ -97,4 +107,13 @@ it("checks short objects without requesting an unsatisfiable R2 range", async ()
   expect((await upload({ "Content-Length": "3" })).status).toBe(415);
   expect(mocks.get).toHaveBeenCalledWith(expect.any(String), { range: { offset: 0, length: 3 } });
   expect(mocks.delete).toHaveBeenCalledOnce();
+});
+
+it("returns a controlled 503 before touching storage when uploads are disabled", async () => {
+  mocks.enabled = false;
+  const response = await upload();
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "File uploads are disabled on this server" });
+  expect(mocks.put).not.toHaveBeenCalled();
+  expect(mocks.batch).not.toHaveBeenCalled();
 });

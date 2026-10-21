@@ -7,6 +7,8 @@ import { bookmarks, bookmarkLists, lists } from "../../../db/schema.ts";
 import { fail, publicBookmark } from "../../../lib/http.ts";
 import { listIds } from "../../../lib/validators.ts";
 import {
+  filesEnabled,
+  FILES_DISABLED_MESSAGE,
   assetMimeSchema,
   uploadLengthSchema,
   MAX_UPLOAD_BYTES,
@@ -17,6 +19,7 @@ import { enqueue } from "../../../lib/enqueue.ts";
 
 export const POST = defineHandler(async (c) => {
   const userId = requireAuth(c).id;
+  if (!filesEnabled()) return fail(503, FILES_DISABLED_MESSAGE);
   const mime = assetMimeSchema.safeParse(c.req.header("Content-Type"));
   if (!mime.success) return fail(415, "Use a JPEG, PNG, WebP, GIF or PDF file");
   const lengthHeader = c.req.header("Content-Length");
