@@ -8,7 +8,7 @@ import { z } from "zod";
 export const idSchema = z.string().uuid();
 export const idParams = z.object({ id: idSchema });
 export const fail = (
-  status: 400 | 401 | 403 | 404 | 409 | 413 | 502 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 411 | 413 | 415 | 502 | 503,
   message: string,
 ): never => {
   throw new HTTPException(status, { message });
@@ -40,10 +40,15 @@ export async function ownList(userId: string, id: string) {
 }
 export function publicBookmark(bookmark: typeof bookmarks.$inferSelect) {
   const {
+    assetKey: _assetKey,
     runId: _runId,
     titleEdited: _titleEdited,
     descriptionEdited: _descriptionEdited,
     ...result
   } = bookmark;
-  return result;
+  return {
+    ...result,
+    hasFile: !!bookmark.assetKey,
+    fileUrl: bookmark.assetKey ? `/api/bookmarks/${bookmark.id}/file` : null,
+  };
 }

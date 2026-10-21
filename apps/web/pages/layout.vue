@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, provide, ref, watch } from "vue";
 import { Link, useRouter } from "@void/vue";
-import { api, message, type User } from "../lib/api.ts";
-import { sessionKey } from "../composables/session.ts";
+import { api, message, type Features, type Me, type User } from "../lib/api.ts";
+import { featuresKey, sessionKey } from "../composables/session.ts";
 import { toast } from "../composables/toast.ts";
 import Icon from "../components/Icon.vue";
 import "../style.css";
@@ -10,6 +10,8 @@ const repository = "https://github.com/lukr-dev/cloudkeep";
 const router = useRouter();
 const user = ref<User | null>(null);
 provide(sessionKey, user);
+const features = ref<Features>({ files: false });
+provide(featuresKey, features);
 const ready = ref(false);
 const error = ref("");
 const signingOut = ref(false);
@@ -30,7 +32,9 @@ async function check() {
       }
     } else {
       try {
-        user.value = (await api<{ user: User }>("/api/me", { redirectOnUnauthorized: false })).user;
+        const me = await api<Me>("/api/me", { redirectOnUnauthorized: false });
+        user.value = me.user;
+        features.value = me.features ?? { files: false };
       } catch (cause) {
         if (!(cause instanceof Error && "status" in cause && cause.status === 401)) throw cause;
         user.value = null;

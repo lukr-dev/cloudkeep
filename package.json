@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "ready": "vp run web#prepare && vp check && vp test && vp run -r build",
-    "dev": "vp run web#dev",
     "prepare": "vp config"
   },
   "devDependencies": {

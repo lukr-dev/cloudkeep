@@ -76,17 +76,27 @@ describe("JSON API client", () => {
 });
 describe("bookmark filters", () => {
   it("round trips search, list and tag including spaces and reserved characters", () => {
-    const filters = { q: "Vue & Workers", listId: "list-1", tag: "c++" };
+    const filters = { type: "", q: "Vue & Workers", listId: "list-1", tag: "c++" };
     expect(readFilters(filterQuery(filters))).toEqual(filters);
     expect(filterUrl(filters)).toBe("/?q=Vue+%26+Workers&listId=list-1&tag=c%2B%2B");
   });
   it("omits empty filters, trims values and ignores unrelated params", () => {
-    expect(filterUrl({ q: "  ", listId: "", tag: "" })).toBe("/");
-    expect(filterUrl({ q: " vue ", listId: "", tag: "" })).toBe("/?q=vue");
+    expect(filterUrl({ type: "", q: "  ", listId: "", tag: "" })).toBe("/");
+    expect(filterUrl({ type: "", q: " vue ", listId: "", tag: "" })).toBe("/?q=vue");
     expect(readFilters(new URLSearchParams("offset=20&other=x"))).toEqual({
+      type: "",
       q: "",
       listId: "",
       tag: "",
     });
   });
+});
+
+it("round trips bookmark type filters and ignores unsupported types", () => {
+  for (const type of ["link", "text", "asset"]) {
+    const filters = { type, q: "", listId: "", tag: "" };
+    expect(readFilters(filterQuery(filters))).toEqual(filters);
+    expect(filterUrl(filters)).toBe(`/?type=${type}`);
+  }
+  expect(readFilters(new URLSearchParams("type=unknown")).type).toBe("");
 });

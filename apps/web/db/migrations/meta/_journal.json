@@ -15,6 +15,20 @@
       "when": 1792238910551,
       "tag": "20261017120830_special_hairball",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792567468547,
+      "tag": "20261021072428_gigantic_nehzno",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792567474188,
+      "tag": "20261021072434_common_sister_grimm",
+      "breakpoints": true
     }
   ]
 }

@@ -37,7 +37,16 @@ export const bookmarks = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => profiles.userId, { onDelete: "cascade" }),
-    url: text("url").notNull(),
+    type: text("type", { enum: ["link", "text", "asset"] })
+      .notNull()
+      .default("link"),
+    url: text("url"),
+    noteText: text("note_text"),
+    assetKey: text("asset_key"),
+    assetType: text("asset_type", { enum: ["image", "pdf"] }),
+    assetMime: text("asset_mime"),
+    assetName: text("asset_name"),
+    assetSize: integer("asset_size"),
     title: text("title"),
     description: text("description"),
     imageUrl: text("image_url"),
