@@ -4,6 +4,6 @@ import { requireAuth } from "void/auth";
 import { profileFor } from "../../lib/http.ts";
 
 export const GET = defineHandler(async (c) => ({
-  features: { files: filesEnabled() },
+  features: { files: filesEnabled(), audio: filesEnabled() },
   user: { ...requireAuth(c), role: (await profileFor(c)).role },
 }));

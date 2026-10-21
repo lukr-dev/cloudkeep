@@ -1,3 +1,4 @@
+import { processingListForCreate } from "../../../lib/processing-list.ts";
 import { HTTPException } from "hono/http-exception";
 import { defineHandler } from "void";
 import { requireAuth } from "void/auth";
@@ -43,6 +44,7 @@ export const POST = defineHandler(async (c) => {
   } catch {
     return fail(400, "Invalid filename encoding");
   }
+  const processingListId = await processingListForCreate(userId, selected.data);
   const id = crypto.randomUUID();
   const runId = crypto.randomUUID();
   const key = `assets/${userId}/${id}`;
@@ -65,6 +67,7 @@ export const POST = defineHandler(async (c) => {
         .values({
           id,
           userId,
+          processingListId,
           type: "asset",
           assetKey: key,
           assetType: mime.data === "application/pdf" ? "pdf" : "image",

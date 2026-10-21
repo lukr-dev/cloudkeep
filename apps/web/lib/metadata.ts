@@ -10,6 +10,7 @@ export type Metadata = {
   faviconUrl: string | null;
   siteName: string | null;
   contentText: string;
+  contentTruncated: boolean;
 };
 function attribute(element: { getAttribute(name: string): string | null }, name: string) {
   const value = element.getAttribute(name);
@@ -19,6 +20,11 @@ export async function extractMetadata(response: Response, pageUrl: string): Prom
   const meta = new Map<string, string>();
   let title = "";
   let content = "";
+  let truncated = false;
+  const append = (text: string) => {
+    if (content.length + text.length > MAX_CONTENT_CHARS) truncated = true;
+    content = (content + text).slice(0, MAX_CONTENT_CHARS);
+  };
   let icon: string | undefined;
   let base = pageUrl;
   let excludedDepth = 0;
@@ -79,10 +85,32 @@ export async function extractMetadata(response: Response, pageUrl: string): Prom
         )
           icon = attribute(element, "href") ?? undefined;
         if (
-          ["p", "div", "br", "li", "h1", "h2", "article"].includes(element.tagName) &&
-          content.length < MAX_CONTENT_CHARS
-        )
-          content += " ";
+          !excludedDepth &&
+          [
+            "p",
+            "div",
+            "br",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "article",
+            "section",
+            "blockquote",
+            "pre",
+            "tr",
+            "hr",
+          ].includes(element.tagName)
+        ) {
+          append("\u2029");
+          if (!["br", "hr"].includes(element.tagName))
+            element.onEndTag(() => {
+              if (!excludedDepth) append("\u2029");
+            });
+        }
       },
     })
     .on("title", {
@@ -92,8 +120,7 @@ export async function extractMetadata(response: Response, pageUrl: string): Prom
     })
     .on("body", {
       text(chunk) {
-        if (!excludedDepth && content.length < MAX_CONTENT_CHARS)
-          content += chunk.text.slice(0, MAX_CONTENT_CHARS - content.length);
+        if (!excludedDepth) append(chunk.text.replace(/\s+/g, " "));
       },
     });
   // Drain incrementally so neither the original nor transformed document is buffered.
@@ -122,7 +149,13 @@ export async function extractMetadata(response: Response, pageUrl: string): Prom
     ),
     siteName: meta.get("og:site_name")?.trim().slice(0, 300) ?? null,
     faviconUrl: resolveHttpUrl(icon ?? "/favicon.ico", base),
-    contentText: content.replace(/\s+/g, " ").trim().slice(0, MAX_CONTENT_CHARS),
+    contentText: content
+      .split("\u2029")
+      .map((p) => p.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, MAX_CONTENT_CHARS),
+    contentTruncated: truncated,
   };
 }
 export async function fetchMetadata(

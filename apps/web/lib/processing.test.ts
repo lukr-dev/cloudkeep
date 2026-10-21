@@ -1,6 +1,10 @@
 import { beforeEach, expect, it, vi } from "vite-plus/test";
 const mocks = vi.hoisted(() => ({
   enabled: true,
+  list: undefined as unknown,
+  effectivePrompts: vi.fn(),
+  prepareAudio: vi.fn(),
+  processAudio: vi.fn(),
   claim: [] as unknown[],
   profile: [] as unknown[],
   patches: [] as Record<string, unknown>[],
@@ -42,12 +46,14 @@ vi.mock("void/storage", () => ({
   ),
 }));
 vi.mock("./metadata.ts", () => ({ fetchMetadata: mocks.fetchMetadata, MAX_CONTENT_CHARS: 20_000 }));
+vi.mock("./processing-list.ts", () => ({ processingList: async () => mocks.list }));
+vi.mock("./audio.ts", () => ({
+  prepareAudio: mocks.prepareAudio,
+  processAudio: mocks.processAudio,
+}));
 vi.mock("./settings.ts", () => ({
   complete: mocks.complete,
-  effectivePrompts: async () => ({
-    tagging: { template: "{{content}}" },
-    summary: { template: "{{content}}" },
-  }),
+  effectivePrompts: mocks.effectivePrompts,
 }));
 vi.mock("./tags.ts", () => ({ linkTag: mocks.linkTag }));
 import { processBookmark } from "./processing.ts";
@@ -55,6 +61,11 @@ const job = { bookmarkId: "b", userId: "u", runId: "r" };
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.enabled = true;
+  mocks.list = undefined;
+  mocks.effectivePrompts.mockResolvedValue({
+    tagging: { template: "{{content}}" },
+    summary: { template: "{{content}}" },
+  });
   mocks.patches.length = 0;
   mocks.profile = [];
   mocks.claim = [
@@ -132,4 +143,62 @@ it("marks existing assets failed with a controlled message while storage is disa
     status: "failed",
     error: "File uploads are disabled on this server",
   });
+});
+
+it("reuses the processing list's model and prompts while preserving the user's keys", async () => {
+  mocks.claim = [{ type: "text", processingListId: "l", noteText: "Note" }];
+  mocks.list = { id: "l", provider: "openrouter", model: "list-model", reasoningEffort: "high" };
+  mocks.profile = [
+    {
+      userId: "u",
+      provider: "openai",
+      model: "user-model",
+      openrouterKey: "encrypted",
+      autoSummary: true,
+    },
+  ];
+  mocks.complete.mockResolvedValue("List summary");
+  await processBookmark(job);
+  expect(mocks.effectivePrompts).toHaveBeenCalledWith("u", "l");
+  expect(mocks.complete).toHaveBeenCalledWith(
+    expect.objectContaining({
+      provider: "openrouter",
+      model: "list-model",
+      reasoningEffort: "high",
+      openrouterKey: "encrypted",
+    }),
+    "Note",
+  );
+  expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
+});
+it("reports a missing key for a list override clearly", async () => {
+  mocks.list = { id: "l", provider: "openai" };
+  mocks.profile = [{ provider: "workers-ai" }];
+  await processBookmark(job);
+  expect(mocks.patches.at(-1)).toMatchObject({
+    status: "failed",
+    error: "Set an API key for the selected list provider",
+  });
+});
+it("starts short audio after normal processing even with automatic summaries off", async () => {
+  mocks.list = { id: "l", audioEnabled: true };
+  mocks.profile = [{ provider: null, autoSummary: false }];
+  mocks.prepareAudio.mockResolvedValue({ runId: "audio-run" });
+  await processBookmark(job);
+  expect(mocks.prepareAudio).toHaveBeenCalledWith("b", "short");
+  expect(mocks.processAudio).toHaveBeenCalledWith({
+    ...job,
+    type: "audio",
+    kind: "short",
+    runId: "audio-run",
+  });
+  expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
+});
+it("silently skips list audio when storage is disabled", async () => {
+  mocks.enabled = false;
+  mocks.list = { id: "l", audioEnabled: true };
+  await processBookmark(job);
+  expect(mocks.prepareAudio).not.toHaveBeenCalled();
+  expect(mocks.processAudio).not.toHaveBeenCalled();
+  expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
 });

@@ -36,6 +36,8 @@ it("preserves bookmarks and all cascading memberships with foreign keys enabled"
     expect(db.prepare("SELECT * FROM bookmarks ORDER BY id").all()).toEqual(
       before.map((row) => ({
         ...row,
+        content_truncated: 0,
+        processing_list_id: null,
         type: "link",
         note_text: null,
         asset_key: null,
@@ -54,7 +56,16 @@ it("preserves bookmarks and all cascading memberships with foreign keys enabled"
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.exec(`INSERT INTO bookmarks (id, user_id, type, run_id, created_at, updated_at)
       VALUES ('note', 'owner', 'text', 'n', 1, 1), ('file', 'owner', 'asset', 'f', 1, 1)`);
+    db.exec("UPDATE bookmarks SET processing_list_id = 'l1' WHERE id = 'a'");
+    db.exec(
+      "INSERT INTO bookmark_audio (bookmark_id, kind, run_id, status, created_at, updated_at) VALUES ('a', 'short', 'audio', 'done', 1, 1)",
+    );
+    db.exec("DELETE FROM lists WHERE id = 'l1'");
+    expect(
+      db.prepare("SELECT processing_list_id FROM bookmarks WHERE id = 'a'").get(),
+    ).toMatchObject({ processing_list_id: null });
     db.exec("DELETE FROM bookmarks WHERE id = 'a'");
+    expect(db.prepare("SELECT * FROM bookmark_audio").all()).toEqual([]);
     expect(db.prepare("SELECT * FROM bookmark_lists WHERE bookmark_id = 'a'").all()).toEqual([]);
     expect(db.prepare("SELECT * FROM bookmark_tags WHERE bookmark_id = 'a'").all()).toEqual([]);
   } finally {

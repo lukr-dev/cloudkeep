@@ -11,13 +11,19 @@ import {
   parseWorkersAiResponse,
 } from "./providers.ts";
 import { decrypt } from "./crypto.ts";
-import { DEFAULT_PROMPTS, PROMPT_VARIABLES, type PromptKind } from "./prompts.ts";
+import { resolvePrompts } from "./list-settings.ts";
+import { DEFAULT_TTS } from "./tts.ts";
+import { PROMPT_VARIABLES } from "./prompts.ts";
 
 export function publicSettings(profile: typeof profiles.$inferSelect) {
   return {
     provider: profile.provider,
     model: profile.model,
     reasoningEffort: profile.reasoningEffort,
+    ttsProvider: profile.ttsProvider,
+    ttsModel: profile.ttsModel,
+    ttsVoice: profile.ttsVoice,
+    defaultTts: DEFAULT_TTS,
     autoTag: profile.autoTag,
     autoSummary: profile.autoSummary,
     keys: {
@@ -28,20 +34,12 @@ export function publicSettings(profile: typeof profiles.$inferSelect) {
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
   };
 }
-export async function effectivePrompts(userId: string) {
+export async function effectivePrompts(userId: string, listId: string | null = null) {
   const overrides = await db
     .select()
     .from(prompts)
-    .where(and(eq(prompts.userId, userId), isNull(prompts.listId)));
-  const entry = (kind: PromptKind) => {
-    const override = overrides.find((p) => p.kind === kind);
-    return {
-      template: override?.template ?? DEFAULT_PROMPTS[kind],
-      defaultTemplate: DEFAULT_PROMPTS[kind],
-      isDefault: !override,
-    };
-  };
-  return { tagging: entry("tagging"), summary: entry("summary"), variables: PROMPT_VARIABLES };
+    .where(and(eq(prompts.userId, userId), listId ? undefined : isNull(prompts.listId)));
+  return { ...resolvePrompts(overrides, listId), variables: PROMPT_VARIABLES };
 }
 export async function complete(
   profile: typeof profiles.$inferSelect,

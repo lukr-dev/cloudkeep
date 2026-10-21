@@ -1,8 +1,16 @@
+import { processingListForCreate } from "../../../lib/processing-list.ts";
 import { defineHandler } from "void";
 import { requireAuth } from "void/auth";
 import { db, and, eq, desc, or, sql, count, inArray } from "void/db";
 import { z } from "zod";
-import { bookmarks, bookmarkLists, bookmarkTags, lists, tags } from "../../../db/schema.ts";
+import {
+  bookmarkAudio,
+  bookmarks,
+  bookmarkLists,
+  bookmarkTags,
+  lists,
+  tags,
+} from "../../../db/schema.ts";
 import { idSchema, fail, publicBookmark } from "../../../lib/http.ts";
 import { createBookmark, pagination, bookmarkType } from "../../../lib/validators.ts";
 import { markdownExcerpt } from "../../../lib/assets.ts";
@@ -59,6 +67,12 @@ export const GET = defineHandler.withValidator({
         .innerJoin(tags, eq(tags.id, bookmarkTags.tagId))
         .where(and(inArray(bookmarkTags.bookmarkId, ids), eq(tags.userId, userId)))
     : [];
+  const audio = ids.length
+    ? await db
+        .select({ bookmarkId: bookmarkAudio.bookmarkId })
+        .from(bookmarkAudio)
+        .where(and(inArray(bookmarkAudio.bookmarkId, ids), sql`${bookmarkAudio.r2Key} is not null`))
+    : [];
   const listLinks = ids.length
     ? await db.select().from(bookmarkLists).where(inArray(bookmarkLists.bookmarkId, ids))
     : [];
@@ -67,6 +81,7 @@ export const GET = defineHandler.withValidator({
       const { contentText: _content, noteText: _note, ...item } = publicBookmark(row);
       return {
         ...item,
+        hasAudio: audio.some((a) => a.bookmarkId === row.id),
         excerpt: row.type === "link" ? null : markdownExcerpt(row.noteText ?? row.contentText),
         tags: tagLinks
           .filter((t) => t.bookmarkId === row.id)
@@ -88,6 +103,7 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
       .where(and(eq(lists.userId, userId), inArray(lists.id, body.listIds)));
     if (owned.length !== body.listIds.length) return fail(404, "List not found");
   }
+  const processingListId = await processingListForCreate(userId, body.listIds);
   const id = crypto.randomUUID();
   const runId = crypto.randomUUID();
   const now = Date.now();
@@ -97,6 +113,7 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
       .values({
         id,
         userId,
+        processingListId,
         type: body.type ?? "link",
         url: body.type === "text" ? null : body.url,
         noteText: body.type === "text" ? body.text : null,
