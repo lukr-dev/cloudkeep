@@ -20,7 +20,8 @@ class CloudKeepModule(context: Context) : LynxModule(context) {
         CloudKeepApplication.io.execute {
             try {
                 val args = JSONObject(payload)
-                val store = app.store
+                // UI-only actions must not wait for Keystore-backed storage.
+                val store by lazy { app.store }
                 val result: Any = when (action) {
                     "getState" -> {
                         ShareTiming.mark("state_read_start")
@@ -53,6 +54,11 @@ class CloudKeepModule(context: Context) : LynxModule(context) {
                         true
                     }
                     "toast" -> { main.post { Toast.makeText(app, args.getString("message"), Toast.LENGTH_LONG).show() }; true }
+                    "setBackHandler" -> {
+                        val enabled = args.getBoolean("enabled")
+                        main.post { MainActivity.current.get()?.backHandler = enabled }
+                        true
+                    }
                     "finishShare" -> { main.post { MainActivity.current.get()?.moveTaskToBack(true) }; true }
                     else -> error("Unknown native action")
                 }
