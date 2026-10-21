@@ -8,9 +8,17 @@ const bookmarkInput = createInsertSchema(bookmarks, {
   title: z.string().trim().max(1_000).nullable().optional(),
   description: z.string().trim().max(4_000).nullable().optional(),
 });
-export const createBookmark = bookmarkInput
+export const bookmarkType = z.enum(["link", "text", "asset"]);
+export const noteText = z.string().min(1).max(100_000);
+export const listIds = z
+  .array(idSchema)
+  .max(30)
+  .transform((ids) => [...new Set(ids)])
+  .default([]);
+const createLink = bookmarkInput
   .pick({ title: true, description: true })
   .extend({
+    type: z.literal("link").optional(),
     url: z
       .string()
       .max(8_000)
@@ -22,20 +30,31 @@ export const createBookmark = bookmarkInput
           return z.NEVER;
         }
       }),
-    listIds: z
-      .array(idSchema)
-      .max(30)
-      .transform((ids) => [...new Set(ids)])
-      .default([]),
+    listIds,
   })
   .strict();
+export const createBookmark = z.union([
+  createLink,
+  z
+    .object({
+      type: z.literal("text"),
+      text: noteText,
+      title: z.string().trim().max(1_000).nullable().optional(),
+      listIds,
+    })
+    .strict(),
+]);
 export const editBookmark = bookmarkInput
   .pick({ title: true, description: true })
-  .extend({ archived: z.boolean().optional() })
+  .extend({ text: noteText.optional(), archived: z.boolean().optional() })
   .strict()
   .refine(
-    (v) => v.title !== undefined || v.description !== undefined || v.archived !== undefined,
-    "Supply a title, description or archived flag",
+    (v) =>
+      v.title !== undefined ||
+      v.description !== undefined ||
+      v.text !== undefined ||
+      v.archived !== undefined,
+    "Supply a title, description, text or archived flag",
   );
 export const archivedQuery = z
   .enum(["1", "true", "0", "false"])

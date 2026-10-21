@@ -3,8 +3,23 @@ import { computed, onMounted, ref } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { allItems, message, type List } from "../lib/api.ts";
 import { filterUrl, readFilters, type Filters } from "../lib/filters.ts";
+import { useFeatures } from "../composables/session.ts";
 import Icon from "./Icon.vue";
-const props = defineProps<{ lists?: List[]; filters?: Filters }>();
+const props = defineProps<{
+  lists?: List[];
+  filters?: Filters;
+  typeOptions?: { value: string; label: string }[];
+}>();
+const features = useFeatures();
+const types = computed(
+  () =>
+    props.typeOptions ?? [
+      { value: "", label: "All" },
+      { value: "link", label: "Links" },
+      { value: "text", label: "Notes" },
+      ...(features.value.files ? [{ value: "asset", label: "Files" }] : []),
+    ],
+);
 const router = useRouter();
 const dashboard = computed(() => router.path === "/");
 const filters = computed(
@@ -31,7 +46,12 @@ onMounted(() => {
       href="/"
       class="filter"
       :aria-current="
-        dashboard && !filters.q && !filters.listId && !filters.tag && !filters.archived
+        dashboard &&
+        !filters.q &&
+        !filters.listId &&
+        !filters.tag &&
+        !filters.type &&
+        !filters.archived
           ? 'page'
           : undefined
       "
@@ -45,6 +65,15 @@ onMounted(() => {
       class="filter"
       :aria-current="dashboard && filters.archived ? 'page' : undefined"
       ><span>Archive</span></Link
+    >
+    <div class="sidebar-head"><h2>Type</h2></div>
+    <Link
+      v-for="option in types"
+      :key="option.value"
+      :href="filterUrl({ ...filters, type: option.value })"
+      class="filter"
+      :aria-current="dashboard && filters.type === option.value ? 'page' : undefined"
+      >{{ option.label }}</Link
     >
     <div class="sidebar-head">
       <h2>Lists</h2>

@@ -2,11 +2,15 @@
 import type { List } from "../lib/api.ts";
 import type { Filters } from "../lib/filters.ts";
 import Sidebar from "./Sidebar.vue";
-defineProps<{ lists?: List[]; filters?: Filters }>();
+defineProps<{
+  lists?: List[];
+  filters?: Filters;
+  typeOptions?: { value: string; label: string }[];
+}>();
 </script>
 <template>
   <div class="collection">
-    <Sidebar :lists="lists" :filters="filters" />
+    <Sidebar :lists="lists" :filters="filters" :type-options="typeOptions" />
     <div class="content"><slot /></div>
   </div>
 </template>

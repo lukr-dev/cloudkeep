@@ -14,16 +14,18 @@ export default defineMiddleware(async (c, next) => {
       !c.req.header("authorization")?.startsWith("Bearer ")
     )
       return c.json({ error: "Untrusted origin" }, 403);
+    const upload = c.req.method === "POST" && c.req.path === "/api/bookmarks/files";
+    const maxBytes = /^\/api\/bookmarks(?:\/[^/]+)?$/.test(c.req.path) ? 640 * 1024 : 64 * 1024;
     let bytes = 0;
-    const reader = c.req.raw.clone().body?.getReader();
+    const reader = upload ? undefined : c.req.raw.clone().body?.getReader();
     if (reader) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
-        if (bytes > 64 * 1024) {
+        if (bytes > maxBytes) {
           void reader.cancel();
-          return c.json({ error: "Request exceeds 64 KiB" }, 413);
+          return c.json({ error: `Request exceeds ${maxBytes / 1024} KiB` }, 413);
         }
       }
     }
@@ -37,6 +39,6 @@ export default defineMiddleware(async (c, next) => {
   // Hono catches exceptions inside downstream dispatch; normalize those too.
   if (c.error instanceof HTTPException) c.res = c.json({ error: c.error.message }, c.error.status);
   else if (c.res.status >= 500) c.res = c.json({ error: "Internal server error" }, 500);
-  c.header("Cache-Control", "no-store");
+  if (!c.res.headers.has("Cache-Control")) c.header("Cache-Control", "no-store");
   c.header("X-Content-Type-Options", "nosniff");
 });

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Link } from "@void/vue";
+import { useFeatures } from "../composables/session.ts";
 import Icon from "./Icon.vue";
 import type { BookmarkItem, BookmarkDetail } from "../lib/api.ts";
 import { filterUrl, type Filters } from "../lib/filters.ts";
@@ -10,15 +11,27 @@ const props = defineProps<{
   busy?: boolean;
 }>();
 defineEmits<{ retry: [id: string]; archive: [id: string] }>();
+const features = useFeatures();
+const storageDisabled = computed(() => props.bookmark.type === "asset" && !features.value.files);
 const imageFailed = ref(false);
 const faviconFailed = ref(false);
 const domain = computed(() => {
   try {
+    if (!props.bookmark.url)
+      return props.bookmark.type === "text"
+        ? "Note"
+        : props.bookmark.assetType === "pdf"
+          ? "PDF"
+          : "Image";
     return new URL(props.bookmark.url).hostname.replace(/^www\./, "");
   } catch {
-    return props.bookmark.url;
+    return props.bookmark.url ?? "";
   }
 });
+const thumbnail = computed(() =>
+  props.bookmark.assetType === "image" ? props.bookmark.fileUrl : props.bookmark.imageUrl,
+);
+const excerpt = computed(() => ("excerpt" in props.bookmark ? props.bookmark.excerpt : ""));
 const working = computed(() => ["pending", "processing"].includes(props.bookmark.status));
 const age = computed(() => {
   const seconds = (props.bookmark.createdAt - Date.now()) / 1000;
@@ -39,13 +52,16 @@ const age = computed(() => {
   <article class="bookmark" :class="{ working }">
     <div class="thumb">
       <img
-        v-if="bookmark.imageUrl && !imageFailed"
-        :src="bookmark.imageUrl"
+        v-if="!storageDisabled && thumbnail && !imageFailed"
+        :src="thumbnail"
         alt=""
         loading="lazy"
         referrerpolicy="no-referrer"
         @error="imageFailed = true"
       />
+      <span v-else-if="bookmark.assetType === 'pdf'" class="pdf-icon"
+        ><Icon name="file" :size="24" /><span>PDF</span></span
+      >
       <span v-else-if="working" class="skeleton fill"></span>
       <span v-else class="letter">{{ domain.charAt(0).toUpperCase() }}</span>
     </div>
@@ -66,14 +82,23 @@ const age = computed(() => {
       </div>
       <h2 class="title">
         <Link :href="`/b/${bookmark.id}`" class="stretched">{{
-          bookmark.title || bookmark.url
+          bookmark.title || bookmark.assetName || bookmark.url || "Untitled note"
         }}</Link>
       </h2>
-      <p v-if="bookmark.description" class="description">{{ bookmark.description }}</p>
-      <p v-if="working" class="status" role="status">
-        <span class="dot pulse"></span>Fetching details
+      <p v-if="storageDisabled" class="description">File storage is disabled</p>
+      <p v-if="bookmark.assetName" class="description">
+        {{ bookmark.assetName }} ·
+        {{
+          ((bookmark.assetSize ?? 0) / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })
+        }}
+        KB
       </p>
-      <div v-else-if="bookmark.status === 'failed'" class="failed">
+      <p v-if="bookmark.type !== 'link' && excerpt" class="description">{{ excerpt }}</p>
+      <p v-if="bookmark.description" class="description">{{ bookmark.description }}</p>
+      <p v-if="working && !storageDisabled" class="status" role="status">
+        <span class="dot pulse"></span>Processing
+      </p>
+      <div v-else-if="bookmark.status === 'failed' && !storageDisabled" class="failed">
         <span>{{ bookmark.error || "Couldn’t fetch this page." }}</span>
         <button class="small" :disabled="busy" @click="$emit('retry', bookmark.id)">
           <Icon name="refresh" :size="13" />Retry
@@ -84,7 +109,9 @@ const age = computed(() => {
           v-for="tag in bookmark.tags"
           :key="tag.id"
           class="chip"
-          :href="filterUrl({ q: '', listId: '', archived: false, ...filters, tag: tag.name })"
+          :href="
+            filterUrl({ q: '', listId: '', type: '', archived: false, ...filters, tag: tag.name })
+          "
           >{{ tag.name }}</Link
         >
       </div>
@@ -101,7 +128,8 @@ const age = computed(() => {
         <Icon name="archive" :size="15" />
       </button>
       <a
-        :href="bookmark.url"
+        v-if="bookmark.url || (bookmark.fileUrl && !storageDisabled)"
+        :href="bookmark.url || bookmark.fileUrl || undefined"
         target="_blank"
         rel="noopener noreferrer"
         class="open"
@@ -112,6 +140,13 @@ const age = computed(() => {
   </article>
 </template>
 <style scoped>
+.pdf-icon {
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+}
 .bookmark {
   position: relative;
   display: flex;

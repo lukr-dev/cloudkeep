@@ -127,7 +127,7 @@ describe("JSON API client", () => {
 });
 describe("bookmark filters", () => {
   it("round trips archive filters and preserves the archive when changing tags or lists", () => {
-    const filters = { q: "vue", listId: "list-1", tag: "web", archived: true };
+    const filters = { type: "", q: "vue", listId: "list-1", tag: "web", archived: true };
     expect(readFilters(filterQuery(filters))).toEqual(filters);
     expect(filterUrl({ ...filters, tag: "cloud" })).toBe(
       "/?q=vue&listId=list-1&tag=cloud&archived=1",
@@ -142,18 +142,30 @@ describe("bookmark filters", () => {
       expect(readFilters(new URLSearchParams({ archived: value })).archived).toBe(false);
   });
   it("round trips search, list and tag including spaces and reserved characters", () => {
-    const filters = { q: "Vue & Workers", listId: "list-1", tag: "c++", archived: false };
+    const filters = { type: "", q: "Vue & Workers", listId: "list-1", tag: "c++", archived: false };
     expect(readFilters(filterQuery(filters))).toEqual(filters);
     expect(filterUrl(filters)).toBe("/?q=Vue+%26+Workers&listId=list-1&tag=c%2B%2B");
   });
   it("omits empty filters, trims values and ignores unrelated params", () => {
-    expect(filterUrl({ q: "  ", listId: "", tag: "", archived: false })).toBe("/");
-    expect(filterUrl({ q: " vue ", listId: "", tag: "", archived: false })).toBe("/?q=vue");
+    expect(filterUrl({ type: "", q: "  ", listId: "", tag: "", archived: false })).toBe("/");
+    expect(filterUrl({ type: "", q: " vue ", listId: "", tag: "", archived: false })).toBe(
+      "/?q=vue",
+    );
     expect(readFilters(new URLSearchParams("offset=20&other=x"))).toEqual({
+      type: "",
       q: "",
       listId: "",
       tag: "",
       archived: false,
     });
   });
+});
+
+it("round trips bookmark type filters and ignores unsupported types", () => {
+  for (const type of ["link", "text", "asset"]) {
+    const filters = { type, q: "", listId: "", tag: "", archived: false };
+    expect(readFilters(filterQuery(filters))).toEqual(filters);
+    expect(filterUrl(filters)).toBe(`/?type=${type}`);
+  }
+  expect(readFilters(new URLSearchParams("type=unknown")).type).toBe("");
 });

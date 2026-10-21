@@ -4,12 +4,19 @@ import { db, and, eq, desc, or, sql, count, inArray, isNull, isNotNull } from "v
 import { z } from "zod";
 import { bookmarks, bookmarkLists, bookmarkTags, lists, tags } from "../../../db/schema.ts";
 import { idSchema, fail, publicBookmark } from "../../../lib/http.ts";
-import { archivedQuery, createBookmark, pagination } from "../../../lib/validators.ts";
+import {
+  archivedQuery,
+  bookmarkType,
+  createBookmark,
+  pagination,
+} from "../../../lib/validators.ts";
+import { markdownExcerpt } from "../../../lib/assets.ts";
 import { enqueue } from "../../../lib/enqueue.ts";
 
 export const GET = defineHandler.withValidator({
   query: pagination.extend({
     archived: archivedQuery,
+    type: bookmarkType.optional(),
     listId: idSchema.optional(),
     tag: z.string().trim().toLowerCase().min(1).max(40).optional(),
     q: z.string().trim().max(200).optional(),
@@ -20,6 +27,7 @@ export const GET = defineHandler.withValidator({
   const where = and(
     eq(bookmarks.userId, userId),
     query.archived ? isNotNull(bookmarks.archivedAt) : isNull(bookmarks.archivedAt),
+    query.type ? eq(bookmarks.type, query.type) : undefined,
     query.listId
       ? sql`exists (select 1 from ${bookmarkLists} where ${bookmarkLists.bookmarkId} = ${bookmarks.id} and ${bookmarkLists.listId} = ${query.listId})`
       : undefined,
@@ -31,6 +39,9 @@ export const GET = defineHandler.withValidator({
           sql`${bookmarks.title} like ${pattern} escape '\\'`,
           sql`${bookmarks.url} like ${pattern} escape '\\'`,
           sql`${bookmarks.description} like ${pattern} escape '\\'`,
+          sql`${bookmarks.noteText} like ${pattern} escape '\\'`,
+          sql`${bookmarks.assetName} like ${pattern} escape '\\'`,
+          sql`${bookmarks.contentText} like ${pattern} escape '\\'`,
         )
       : undefined,
   );
@@ -60,9 +71,10 @@ export const GET = defineHandler.withValidator({
     : [];
   return {
     items: rows.map((row) => {
-      const { contentText: _content, ...item } = publicBookmark(row);
+      const { contentText: _content, noteText: _note, ...item } = publicBookmark(row);
       return {
         ...item,
+        excerpt: row.type === "link" ? null : markdownExcerpt(row.noteText ?? row.contentText),
         tags: tagLinks
           .filter((t) => t.bookmarkId === row.id)
           .map(({ bookmarkId: _id, ...tag }) => tag),
@@ -92,11 +104,13 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
       .values({
         id,
         userId,
-        url: body.url,
+        type: body.type ?? "link",
+        url: body.type === "text" ? null : body.url,
+        noteText: body.type === "text" ? body.text : null,
         title: body.title,
-        description: body.description,
+        description: body.type === "text" ? undefined : body.description,
         titleEdited: body.title !== undefined,
-        descriptionEdited: body.description !== undefined,
+        descriptionEdited: body.type !== "text" && body.description !== undefined,
         runId,
         createdAt: now,
         updatedAt: now,
@@ -117,6 +131,7 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
     ),
   ]);
   if (!created[0]) {
+    if (body.type === "text") return fail(503, "Could not save note");
     const where = and(eq(bookmarks.userId, userId), eq(bookmarks.url, body.url));
     const bumpedAt = Date.now();
     const [updated] = await db.batch([

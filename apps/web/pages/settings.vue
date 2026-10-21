@@ -8,7 +8,10 @@ import {
   type Provider,
   type ReasoningEffort,
 } from "../lib/api.ts";
+import { useFeatures, useSession } from "../composables/session.ts";
 import { useTask } from "../composables/task.ts";
+const user = useSession();
+const features = useFeatures();
 const settings = ref<Settings | null>(null);
 const prompts = ref<Prompts | null>(null);
 const provider = ref<Provider | "">("");
@@ -118,6 +121,19 @@ function savePrompt(kind: "tagging" | "summary", reset = false) {
     <div v-if="!settings || !prompts" class="loading" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="skeleton"></div>
     </div>
+    <p v-if="user?.role === 'admin'" class="muted small">
+      File uploads: {{ features.files ? "on" : "off"
+      }}<template v-if="!features.files">
+        — enable R2 and redeploy with CLOUDKEEP_FILES=true, see
+        <a
+          class="link"
+          href="https://github.com/lukr-dev/cloudkeep/blob/dev/apps/web/README.md#file-uploads-optional-needs-r2"
+          target="_blank"
+          rel="noopener noreferrer"
+          >README</a
+        >.
+      </template>
+    </p>
     <template v-if="settings && prompts">
       <form class="group fade-in" @submit.prevent="save">
         <div class="intro">

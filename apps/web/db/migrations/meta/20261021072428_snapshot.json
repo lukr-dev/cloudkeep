@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "af200ac4-883c-4eb4-81b8-830120cdb11f",
+  "id": "74e1d094-ff5a-4117-9dd8-a5cd74fbdbb4",
   "prevId": "151179ca-d8fe-4ce2-8db3-ebfbc98b32ea",
   "tables": {
     "bookmark_lists": {
@@ -136,11 +136,61 @@
           "notNull": true,
           "autoincrement": false
         },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'link'"
+        },
         "url": {
           "name": "url",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "note_text": {
+          "name": "note_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asset_key": {
+          "name": "asset_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asset_type": {
+          "name": "asset_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asset_mime": {
+          "name": "asset_mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asset_name": {
+          "name": "asset_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "asset_size": {
+          "name": "asset_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "title": {
@@ -230,13 +280,6 @@
           "autoincrement": false,
           "default": false
         },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -262,12 +305,6 @@
           "name": "bookmarks_user_created",
           "columns": ["user_id", "created_at", "id"],
           "isUnique": false
-        },
-        "bookmarks_user_active_created": {
-          "name": "bookmarks_user_active_created",
-          "columns": ["user_id", "created_at", "id"],
-          "isUnique": false,
-          "where": "\"bookmarks\".\"archived_at\" is null"
         }
       },
       "foreignKeys": {

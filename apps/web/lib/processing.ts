@@ -1,6 +1,9 @@
+import { filesEnabled, FILES_DISABLED_MESSAGE } from "./assets.ts";
+import { ai } from "void/ai";
+import { storage } from "void/storage";
 import { db, and, eq, sql } from "void/db";
 import { bookmarks, bookmarkTags, profiles, tags } from "../db/schema.ts";
-import { fetchMetadata } from "./metadata.ts";
+import { fetchMetadata, MAX_CONTENT_CHARS } from "./metadata.ts";
 import { complete, effectivePrompts } from "./settings.ts";
 import { parseTags, renderPrompt } from "./prompts.ts";
 import { linkTag } from "./tags.ts";
@@ -19,7 +22,37 @@ export async function processBookmark(job: ProcessMessage) {
     .returning();
   if (!bookmark) return;
   try {
-    const metadata = await fetchMetadata(bookmark.url);
+    if (bookmark.type === "asset" && !filesEnabled()) throw new Error(FILES_DISABLED_MESSAGE);
+    let content =
+      bookmark.type === "asset"
+        ? bookmark.contentText || bookmark.assetName || ""
+        : (bookmark.noteText ?? bookmark.contentText ?? "");
+    if (bookmark.type === "asset" && bookmark.assetKey) {
+      try {
+        const object = await storage.get(bookmark.assetKey);
+        if (object) {
+          const result = await ai.toMarkdown({
+            name: bookmark.assetName ?? "file",
+            blob: new Blob([await object.arrayBuffer()], {
+              type: bookmark.assetMime ?? "application/octet-stream",
+            }),
+          });
+          if (result.format !== "error" && typeof result.data === "string" && result.data.trim())
+            content = result.data.slice(0, MAX_CONTENT_CHARS);
+        }
+      } catch {
+        // Extraction is optional, including when local development has no AI binding.
+      }
+    }
+    const metadata =
+      bookmark.type === "link"
+        ? await fetchMetadata(bookmark.url!)
+        : {
+            title: bookmark.title ?? bookmark.assetName,
+            description: bookmark.description,
+            contentText: content.slice(0, MAX_CONTENT_CHARS),
+          };
+
     await db
       .update(bookmarks)
       .set({
@@ -42,12 +75,12 @@ export async function processBookmark(job: ProcessMessage) {
         .where(eq(tags.userId, job.userId))
         .limit(200);
       const variables = {
-        url: bookmark.url,
+        url: bookmark.url ?? "",
         title: bookmark.titleEdited ? (bookmark.title ?? "") : (metadata.title ?? ""),
         description: bookmark.descriptionEdited
           ? (bookmark.description ?? "")
           : (metadata.description ?? ""),
-        content: metadata.contentText,
+        content: bookmark.type === "text" ? (bookmark.noteText ?? "") : metadata.contentText,
         existing_tags: JSON.stringify(existingTags.map((t) => t.name)),
         language: "English",
       };
@@ -84,11 +117,12 @@ export async function processBookmark(job: ProcessMessage) {
     // Only controlled messages go to the API; SDK errors may include secrets.
     const message =
       error instanceof Error &&
-      /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
-        error.message,
-      )
+      (error.message === FILES_DISABLED_MESSAGE ||
+        /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
+          error.message,
+        ))
         ? error.message
-        : "Couldn’t process this page. Check the link and your AI settings, then retry.";
+        : "Couldn’t process this bookmark. Check your AI settings, then retry.";
     await db
       .update(bookmarks)
       .set({ status: "failed", error: message, updatedAt: Date.now() })

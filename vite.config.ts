@@ -12,5 +12,6 @@ export default defineConfig({
   },
   run: {
     cache: true,
+    tasks: { dev: { command: "vp run web#dev", cache: false } },
   },
 });

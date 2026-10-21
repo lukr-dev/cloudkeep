@@ -54,7 +54,7 @@ onMounted(() => void run(load));
       <ul v-else class="cloud fade-in">
         <li v-for="tag in visibleTags" :key="tag.id">
           <Link
-            :href="filterUrl({ archived: false, q: '', listId: '', tag: tag.name })"
+            :href="filterUrl({ archived: false, q: '', listId: '', type: '', tag: tag.name })"
             :style="{ fontSize: `${tagFontSize(tag.count, maxCount)}rem` }"
             :title="`${tag.count} ${tag.count === 1 ? 'bookmark' : 'bookmarks'}`"
             class="cloud-tag break"

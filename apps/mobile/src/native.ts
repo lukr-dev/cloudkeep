@@ -86,6 +86,7 @@ export async function native<T>(action: string, payload: Record<string, unknown>
     case "openUrl":
     case "finishShare":
       throw new Error("This action requires the CloudKeep Android host.");
+    case "setBackHandler":
     case "toast":
     case "frontendReady":
     case "markTiming":

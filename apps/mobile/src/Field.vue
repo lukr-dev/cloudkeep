@@ -8,10 +8,12 @@ const props = withDefaults(
     placeholder?: string;
     password?: boolean;
     maxLength?: number;
+    hideLabel?: boolean;
+    confirmType?: "search" | "done";
   }>(),
-  { placeholder: "", password: false, maxLength: 8000 },
+  { placeholder: "", password: false, maxLength: 8000, confirmType: "done" },
 );
-const emit = defineEmits<{ change: [value: string] }>();
+const emit = defineEmits<{ change: [value: string]; confirm: [] }>();
 const binding = inputBinding(
   () => props.value,
   (value) => emit("change", value),
@@ -19,35 +21,40 @@ const binding = inputBinding(
 </script>
 <template>
   <view class="field">
-    <text class="label">{{ label }}</text>
+    <text v-if="!hideLabel" class="label">{{ label }}</text>
     <input
       :id="binding.id"
       :default-value="binding.initialValue"
       :placeholder="placeholder"
       :type="password ? 'password' : 'text'"
       :maxlength="maxLength"
+      :confirm-type="confirmType"
       :accessibility-label="label"
       @input="binding.input($event.detail.value)"
+      @confirm="emit('confirm')"
     />
   </view>
 </template>
 <style scoped>
 .field {
-  margin-bottom: 14px;
+  width: 100%;
+  margin-bottom: 12px;
 }
 .label {
+  font-family: GeistMedium, sans-serif;
   font-size: 13px;
-  color: #52525b;
-  margin-bottom: 6px;
+  color: var(--muted);
+  margin-bottom: 8px;
 }
 input {
   width: 100%;
-  height: 46px;
-  padding: 10px 12px;
-  border: 1px solid #d4d4d8;
+  height: 48px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  color: #18181b;
-  background-color: #fff;
-  font-size: 16px;
+  color: var(--text);
+  background-color: var(--surface);
+  font-family: Geist, sans-serif;
+  font-size: 15px;
 }
 </style>

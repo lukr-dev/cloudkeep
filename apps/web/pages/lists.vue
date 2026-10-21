@@ -87,7 +87,7 @@ function remove(list: List) {
         </form>
         <template v-else>
           <Link
-            :href="filterUrl({ archived: false, q: '', tag: '', listId: list.id })"
+            :href="filterUrl({ archived: false, q: '', tag: '', type: '', listId: list.id })"
             class="name break"
             >{{ list.name }}</Link
           >
