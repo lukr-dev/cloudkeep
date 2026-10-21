@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { BookmarkItem } from "../api.ts";
-import { domain } from "../presentation.ts";
+import { bookmarkTitle, sourceName } from "../presentation.ts";
 import BookmarkSource from "./BookmarkSource.vue";
 const props = defineProps<{ bookmark: BookmarkItem; disabled?: boolean }>();
 defineEmits<{ open: [id: string] }>();
@@ -19,7 +19,7 @@ const working = computed(() => ["pending", "processing"].includes(props.bookmark
     class="bookmark-card"
     accessibility-element
     accessibility-traits="button"
-    :accessibility-label="bookmark.title || bookmark.url"
+    :accessibility-label="bookmarkTitle(bookmark)"
     @tap="!disabled && $emit('open', bookmark.id)"
     ><view class="thumb"
       ><image
@@ -29,15 +29,15 @@ const working = computed(() => ["pending", "processing"].includes(props.bookmark
         mode="aspectFill"
         @error="failed = true"
       /><text v-else-if="!working" class="letter">{{
-        domain(bookmark.url).charAt(0).toUpperCase()
+        sourceName(bookmark).charAt(0).toUpperCase()
       }}</text></view
     ><view class="bookmark-body"
       ><BookmarkSource
-        :url="bookmark.url"
+        :source="sourceName(bookmark)"
         :site-name="bookmark.siteName"
         :favicon-url="bookmark.faviconUrl"
         :created-at="bookmark.createdAt"
-      /><text class="bookmark-title" :maxline="2">{{ bookmark.title || bookmark.url }}</text
+      /><text class="bookmark-title" :maxline="2">{{ bookmarkTitle(bookmark) }}</text
       ><text v-if="working" class="meta">Fetching details…</text
       ><view v-else-if="bookmark.tags.length" class="tag-row"
         ><text v-for="tag in bookmark.tags.slice(0, 3)" :key="tag.id" class="tag-label" :maxline="1"

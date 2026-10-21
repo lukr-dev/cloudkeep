@@ -6,6 +6,7 @@ import Button from "../components/Button.vue";
 import Chip from "../components/Chip.vue";
 import ChoiceRow from "../components/ChoiceRow.vue";
 import BookmarkSource from "../components/BookmarkSource.vue";
+import { bookmarkTitle, sourceName } from "../presentation.ts";
 const props = defineProps<{
   bookmark: BookmarkDetail;
   lists: List[];
@@ -38,13 +39,13 @@ watch(
         mode="aspectFill"
         accessibility-label="Bookmark preview"
         @error="imageFailed = true" /><BookmarkSource
-        :url="bookmark.url"
+        :source="sourceName(bookmark)"
         :site-name="bookmark.siteName"
         :favicon-url="bookmark.faviconUrl"
         :created-at="bookmark.createdAt" /><text class="detail-title">{{
-        bookmark.title || bookmark.url
+        bookmarkTitle(bookmark)
       }}</text
-      ><text class="muted" :maxline="1">{{ bookmark.url }}</text
+      ><text v-if="bookmark.url" class="muted" :maxline="1">{{ bookmark.url }}</text
       ><text v-if="bookmark.description" class="body spaced">{{ bookmark.description }}</text
       ><view v-if="bookmark.summary" class="summary"
         ><text class="caption summary-label">Summary</text
@@ -58,7 +59,12 @@ watch(
             ? bookmark.error || "Could not fetch this page."
             : "Fetching details…"
         }}</text
-      ><Button label="Open in browser" primary :disabled="busy" @press="$emit('open')" /><Button
+      ><Button
+        v-if="bookmark.url"
+        label="Open in browser"
+        primary
+        :disabled="busy"
+        @press="$emit('open')" /><Button
         label="Refresh details"
         quiet
         :disabled="busy"

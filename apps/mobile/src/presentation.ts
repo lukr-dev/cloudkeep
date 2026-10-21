@@ -1,3 +1,5 @@
+import type { BookmarkItem } from "./api.ts";
+type Labelled = Pick<BookmarkItem, "type" | "url" | "title" | "assetName" | "assetType">;
 // Lynx does not guarantee URL or Intl.RelativeTimeFormat globals.
 export function domain(url: string): string {
   const host = /^https?:\/\/([^/?#]+)/i.exec(url.trim())?.[1];
@@ -7,6 +9,15 @@ export function domain(url: string): string {
         .replace(/^www\./i, "")
         .replace(/:\d+$/, "")
     : url;
+}
+// Notes and files have no URL; label them like the web app does.
+export function sourceName(bookmark: Labelled): string {
+  if (bookmark.url) return domain(bookmark.url);
+  if (bookmark.type === "text") return "Note";
+  return bookmark.assetType === "pdf" ? "PDF" : "Image";
+}
+export function bookmarkTitle(bookmark: Labelled): string {
+  return bookmark.title || bookmark.assetName || bookmark.url || "Untitled note";
 }
 export function relativeAge(createdAt: number, now = Date.now()): string {
   const seconds = Math.max(0, (now - createdAt) / 1000);

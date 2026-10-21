@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { domain, relativeAge } from "../presentation.ts";
+import { relativeAge } from "../presentation.ts";
 const props = defineProps<{
-  url: string;
+  source: string;
   siteName?: string | null;
   faviconUrl?: string | null;
   createdAt: number;
@@ -24,9 +24,9 @@ watch(
       mode="aspectFill"
       @error="failed = true"
     /><text v-else-if="faviconUrl && failed" class="favicon-letter">{{
-      domain(url).charAt(0).toUpperCase()
+      source.charAt(0).toUpperCase()
     }}</text
-    ><text class="source-name" :maxline="1">{{ siteName || domain(url) }}</text
+    ><text class="source-name" :maxline="1">{{ siteName || source }}</text
     ><text class="meta">· {{ relativeAge(createdAt) }}</text></view
   >
 </template>
