@@ -2,7 +2,8 @@
 import { onMounted, onUnmounted, provide, ref, watch } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { api, message, type Features, type Me, type User } from "../lib/api.ts";
-import { featuresKey, sessionKey } from "../composables/session.ts";
+import { featuresKey, sessionKey, setupTokenRequiredKey } from "../composables/session.ts";
+import { listsStore } from "../composables/lists.ts";
 import { toast } from "../composables/toast.ts";
 import Icon from "../components/Icon.vue";
 import { trackNavigation } from "../lib/navigation.ts";
@@ -16,65 +17,80 @@ provide(featuresKey, features);
 const ready = ref(false);
 const error = ref("");
 const signingOut = ref(false);
+const setupTokenRequired = ref(false);
+provide(setupTokenRequiredKey, setupTokenRequired);
 let generation = 0;
+let checked = false;
+let checking = false;
+let needsSetup = false;
+function guard() {
+  if (!checked) return;
+  const path = router.path;
+  let target: string | undefined;
+  if (needsSetup) {
+    if (path !== "/setup") target = "/setup";
+  } else if (path === "/setup" || (user.value && ["/login", "/register"].includes(path))) {
+    target = user.value ? "/" : "/login";
+  } else if (!user.value && !["/login", "/register"].includes(path)) {
+    target = "/login";
+  } else if (path.startsWith("/admin") && user.value?.role !== "admin") {
+    target = "/";
+  }
+  if (target) {
+    void router.visit(target, { replace: true }).catch((cause) => {
+      error.value = message(cause);
+    });
+  } else ready.value = true;
+}
 async function check() {
+  if (checking) return;
+  checking = true;
   const current = ++generation;
-  ready.value = false;
   error.value = "";
   try {
-    const { needsSetup } = await api<{ needsSetup: boolean }>("/api/setup/status");
-    if (current !== generation) return;
-    const path = router.path;
-    if (needsSetup) {
-      user.value = null;
-      if (path !== "/setup") {
-        await router.visit("/setup", { replace: true });
-        return;
-      }
-    } else {
+    const status = await api<{ needsSetup: boolean; tokenRequired?: boolean }>("/api/setup/status");
+    let me: Me | null = null;
+    if (!status.needsSetup) {
       try {
-        const me = await api<Me>("/api/me", { redirectOnUnauthorized: false });
-        user.value = me.user;
-        features.value = me.features ?? { files: false, audio: false };
+        me = await api<Me>("/api/me", { redirectOnUnauthorized: false });
       } catch (cause) {
         if (!(cause instanceof Error && "status" in cause && cause.status === 401)) throw cause;
-        user.value = null;
-      }
-      if (current !== generation) return;
-      if (path === "/setup" || (user.value && ["/login", "/register"].includes(path))) {
-        await router.visit(user.value ? "/" : "/login", { replace: true });
-        return;
-      }
-      if (!user.value && !["/login", "/register"].includes(path)) {
-        await router.visit("/login", { replace: true });
-        return;
-      }
-      if (path.startsWith("/admin") && user.value?.role !== "admin") {
-        await router.visit("/", { replace: true });
-        return;
       }
     }
-    ready.value = true;
+    if (current !== generation) return;
+    needsSetup = status.needsSetup;
+    setupTokenRequired.value = status.tokenRequired ?? false;
+    user.value = me?.user ?? null;
+    features.value = me?.features ?? { files: false, audio: false };
+    checked = true;
+    guard();
   } catch (cause) {
     if (current === generation) error.value = message(cause);
+  } finally {
+    checking = false;
   }
 }
 let stopTracking: (() => void) | undefined;
-onUnmounted(() => stopTracking?.());
+let stopRevalidation: (() => void) | undefined;
+onUnmounted(() => {
+  ++generation;
+  stopTracking?.();
+  stopRevalidation?.();
+});
 onMounted(() => {
   stopTracking = trackNavigation();
-  watch(
-    () => router.path,
-    () => void check(),
-    { immediate: true },
-  );
+  stopRevalidation = listsStore.revalidateOnVisible();
+  watch(() => router.path, guard);
+  void check();
 });
 async function signOut() {
   signingOut.value = true;
   error.value = "";
   try {
     await api("/api/auth/sign-out", { method: "POST", body: {} });
+    ++generation;
     user.value = null;
+    listsStore.clear();
     await router.visit("/login");
   } catch (cause) {
     error.value = message(cause);

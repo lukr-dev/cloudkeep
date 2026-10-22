@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, ref } from "vue";
 import { Link, useRouter } from "@void/vue";
 import { api } from "../lib/api.ts";
+import { setupTokenRequiredKey } from "../composables/session.ts";
 import { useTask } from "../composables/task.ts";
 const props = defineProps<{ mode: "setup" | "login" | "register" }>();
 const router = useRouter();
@@ -9,16 +10,7 @@ const name = ref("");
 const email = ref("");
 const password = ref("");
 const setupToken = ref("");
-const tokenRequired = ref(false);
-onMounted(async () => {
-  if (props.mode !== "setup") return;
-  try {
-    tokenRequired.value =
-      (await api<{ tokenRequired?: boolean }>("/api/setup/status")).tokenRequired ?? false;
-  } catch {
-    // The layout already reports status errors.
-  }
-});
+const tokenRequired = inject(setupTokenRequiredKey, ref(false));
 const code = computed(() => router.query.get("code") ?? "");
 const { busy, error, run } = useTask();
 const copy = computed(

@@ -5,18 +5,17 @@ import BookmarkCard from "../components/BookmarkCard.vue";
 import Icon from "../components/Icon.vue";
 import BookmarkLayout from "../components/BookmarkLayout.vue";
 import {
-  allItems,
   api,
   message,
   uploadFile,
   type Bookmark,
   type BookmarkItem,
-  type List,
   type Page,
 } from "../lib/api.ts";
 import { filterQuery, filterUrl, readFilters } from "../lib/filters.ts";
 import { useFeatures } from "../composables/session.ts";
 import { useTask } from "../composables/task.ts";
+import { listsStore } from "../composables/lists.ts";
 import { usePolling } from "../composables/polling.ts";
 import { ASSET_MIMES, MAX_UPLOAD_BYTES } from "../lib/file-types.ts";
 const MarkdownEditor = defineAsyncComponent(() => import("../components/MarkdownEditor.vue"));
@@ -41,7 +40,7 @@ const typeOptions = computed(() => [
 const router = useRouter();
 const filters = reactive(readFilters(router.query));
 const bookmarks = ref<BookmarkItem[]>([]);
-const lists = ref<List[]>([]);
+const { lists } = listsStore;
 const total = ref(0);
 const loading = ref(true);
 const loadError = ref("");
@@ -54,15 +53,12 @@ let disposed = false;
 let controller: AbortController | undefined;
 const hasFilters = computed(() => !!(filters.q || filters.listId || filters.tag || filters.type));
 const activeList = computed(() => lists.value.find((list) => list.id === filters.listId));
-async function refreshCatalog() {
-  const result = await allItems<List>("/api/lists");
-  if (!disposed) lists.value = result;
-  if (!features.value.files) {
-    const assets = await api<Page<BookmarkItem> & { total: number }>(
-      "/api/bookmarks?type=asset&limit=1",
-    );
-    if (!disposed) hasAssets.value = assets.total > 0;
-  }
+async function checkAssets() {
+  if (features.value.files) return;
+  const assets = await api<Page<BookmarkItem> & { total: number }>(
+    "/api/bookmarks?type=asset&limit=1",
+  );
+  if (!disposed) hasAssets.value = assets.total > 0;
 }
 async function load(more = false, background = false) {
   const current = ++request;
@@ -90,6 +86,16 @@ async function load(more = false, background = false) {
     );
     if (current !== request || disposed) return;
     const items = pages.flatMap((page) => page.items);
+    const settled =
+      background &&
+      items.some(
+        (item) =>
+          !["pending", "processing"].includes(item.status) &&
+          bookmarks.value.some(
+            (previous) =>
+              previous.id === item.id && ["pending", "processing"].includes(previous.status),
+          ),
+      );
     bookmarks.value = more
       ? [
           ...bookmarks.value,
@@ -97,7 +103,7 @@ async function load(more = false, background = false) {
         ]
       : items;
     total.value = pages[0]!.total;
-    if (background) await refreshCatalog();
+    if (settled) await listsStore.refresh().catch(() => {});
   } catch (cause) {
     if (
       current === request &&
@@ -151,10 +157,12 @@ async function add() {
     saved = true;
   });
   // Refresh outside the busy window so the next link can be submitted right away.
-  if (saved)
-    await Promise.all([load(), refreshCatalog()]).catch((cause) => {
+  if (saved) {
+    schedule(true);
+    await Promise.all([load(), listsStore.refresh()]).catch((cause) => {
       loadError.value = message(cause);
     });
+  }
 }
 function archive(id: string) {
   const bookmark = bookmarks.value.find((item) => item.id === id);
@@ -172,7 +180,7 @@ function archive(id: string) {
       schedule();
     }
     notice.value = archived ? "Bookmark archived" : "Bookmark restored";
-    await refreshCatalog();
+    await listsStore.refresh();
   });
 }
 async function addFiles(files: File[]) {
@@ -202,7 +210,8 @@ async function addFiles(files: File[]) {
       }
     }
     if (fileInput.value) fileInput.value.value = "";
-    await Promise.all([load(), refreshCatalog()]);
+    schedule(true);
+    await Promise.all([load(), listsStore.refresh()]);
   });
 }
 function selectFiles(event: Event) {
@@ -221,6 +230,7 @@ function retry(id: string) {
     try {
       await api(`/api/bookmarks/${id}/reprocess`, { method: "POST", body: {} });
     } finally {
+      schedule(true);
       await load(false, true);
     }
   });
@@ -228,7 +238,7 @@ function retry(id: string) {
 onMounted(() => {
   window.addEventListener("dragover", dragOver);
   window.addEventListener("drop", drop);
-  void refreshCatalog().catch((cause) => {
+  void Promise.all([listsStore.ensure(), checkAssets()]).catch((cause) => {
     loadError.value = message(cause);
   });
   watch(
