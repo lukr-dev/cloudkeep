@@ -41,8 +41,8 @@ class CloudKeepModule(context: Context) : LynxModule(context) {
                         true
                     }
                     "request" -> {
-                        val state = store.snapshot()
-                        ApiClient().request(state.getString("server"), state.getString("token"), args.getString("path"), args.optString("method", "GET"), if (args.has("body")) args.getString("body") else null)
+                        val credentials = store.credentials()
+                        ApiClient().request(credentials.server, credentials.token, args.getString("path"), args.optString("method", "GET"), if (args.has("body")) args.getString("body") else null)
                     }
                     "openUrl" -> {
                         val url = args.getString("url")

@@ -18,12 +18,19 @@ class SecureStore(context: Context, private val shares: ShareStore) {
             preferences.getString("defaultList", "")!!, preferences.getString("pendingUrl", "")!!)
         preferences.edit().remove("shareMode").remove("defaultList").remove("pendingUrl").apply()
     }
-    val server: String get() = preferences.getString("server", DEFAULT_SERVER)!!
-    val token: String get() = preferences.getString("token", "")!!
+    data class Credentials(val server: String, val token: String)
+    private var cachedCredentials: Credentials? = null
 
-    @Synchronized fun snapshot(): JSONObject = JSONObject().put("server", server).put("token", token)
-        .put("shareMode", shares.mode).put("defaultList", shares.defaultList)
-        .put("pendingUrl", shares.pendingUrl).put("lists", shares.lists)
+    @Synchronized fun credentials(): Credentials = cachedCredentials ?: Credentials(
+        preferences.getString("server", DEFAULT_SERVER)!!, preferences.getString("token", "")!!
+    ).also { cachedCredentials = it }
+
+    @Synchronized fun snapshot(): JSONObject {
+        val credentials = credentials()
+        return JSONObject().put("server", credentials.server).put("token", credentials.token)
+            .put("shareMode", shares.mode).put("defaultList", shares.defaultList)
+            .put("pendingUrl", shares.pendingUrl).put("lists", shares.lists)
+    }
 
     @Synchronized fun credentials(server: String, token: String) {
         val normalized = ApiClient.normalizeServer(server)
@@ -31,17 +38,21 @@ class SecureStore(context: Context, private val shares: ShareStore) {
         // Defaults belong to one account, and must never cross an account/server change.
         shares.clearAccount()
         check(editor.commit()) { "Could not store credentials" }
+        cachedCredentials = Credentials(normalized, token)
     }
     @Synchronized fun clearCredentials() {
         shares.clearAccount()
+        val current = credentials()
         check(preferences.edit().remove("token").commit()) { "Could not clear credentials" }
+        cachedCredentials = Credentials(current.server, "")
     }
     @Synchronized fun shareSettings(mode: String, list: String) {
         shares.settings(mode, list)
     }
     @Synchronized fun cacheLists(server: String, token: String, lists: org.json.JSONArray) {
         // A response from a previous account must not repopulate its cleared cache.
-        if (server == this.server && token.isNotEmpty() && token == this.token) shares.cache(lists)
+        val current = credentials()
+        if (server == current.server && token.isNotEmpty() && token == current.token) shares.cache(lists)
     }
 
     companion object { const val DEFAULT_SERVER = "https://cloudkeep.toastnet.work" }
