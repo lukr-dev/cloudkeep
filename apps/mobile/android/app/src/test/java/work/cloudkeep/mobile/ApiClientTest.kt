@@ -7,6 +7,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ApiClientTest {
+    @Test fun reusesConnectionsAcrossApiClientInstances() {
+        MockWebServer().use { server ->
+            repeat(2) { server.enqueue(MockResponse().setBody("{}")) }
+            repeat(2) {
+                ApiClient().request(server.url("/").toString(), "token", "/api/bookmarks", "GET", null)
+                assertEquals(it, server.takeRequest().sequenceNumber)
+            }
+        }
+    }
+
     @Test fun savesWithBearerAndOptionalListWithoutOriginOrCookie() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(201).setBody("{\"alreadyExists\":false}"))

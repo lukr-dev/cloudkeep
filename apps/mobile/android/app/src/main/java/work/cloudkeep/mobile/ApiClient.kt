@@ -10,11 +10,6 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 
 class ApiClient {
-    // Never forward a bearer token to a redirect target, including another origin.
-    private val client = OkHttpClient.Builder()
-        .followRedirects(false).followSslRedirects(false)
-        .callTimeout(20, TimeUnit.SECONDS).build()
-
     fun request(server: String, token: String, path: String, method: String, body: String?): JSONObject {
         require(path.startsWith("/api/") && !path.contains("..") && !path.contains('\\') && !path.contains('#')) { "Invalid API path" }
         require(method in listOf("GET", "POST", "PATCH", "PUT", "DELETE")) { "Invalid method" }
@@ -38,6 +33,11 @@ class ApiClient {
     }
 
     companion object {
+        // Never forward a bearer token to a redirect target, including another origin.
+        private val client = OkHttpClient.Builder()
+            .followRedirects(false).followSslRedirects(false)
+            .callTimeout(20, TimeUnit.SECONDS).build()
+
         fun normalizeServer(value: String): String {
             val uri = URI(value.trim().trimEnd('/'))
             require(uri.scheme in listOf("http", "https") && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.rawQuery == null && uri.rawFragment == null && uri.path.orEmpty().isEmpty()) { "Use a server origin, for example https://cloudkeep.toastnet.work" }

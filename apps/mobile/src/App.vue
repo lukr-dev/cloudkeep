@@ -12,6 +12,7 @@ import {
   type Tag,
 } from "./api.ts";
 import { native, hasNativeHost, openUrl, type NativeState } from "./native.ts";
+import { resource } from "./resource.ts";
 import AppBar from "./components/AppBar.vue";
 import BottomNav from "./components/BottomNav.vue";
 import Button from "./components/Button.vue";
@@ -68,6 +69,26 @@ const savedDuplicate = ref(false);
 const confirm = ref<{ label: string; action: () => Promise<void> }>();
 let loadVersion = 0;
 let catalogVersion = 0;
+let resumePending: "all" | "saved" | undefined;
+const listResource = resource(loadLists);
+const tagResource = resource(loadTags);
+const feedResource = resource(() => fetchFeed());
+
+function clearResources() {
+  ++catalogVersion;
+  ++loadVersion;
+  listResource.clear();
+  tagResource.clear();
+  feedResource.clear();
+  listsLoading.value = false;
+  loading.value = false;
+  bookmarks.value = [];
+  total.value = 0;
+  lists.value = [];
+  tags.value = [];
+  detail.value = undefined;
+  resumePending = undefined;
+}
 
 function message(cause: unknown) {
   return cause instanceof Error ? cause.message : "Something went wrong. Please retry.";
@@ -76,10 +97,7 @@ async function failure(cause: unknown) {
   error.value = message(cause);
   if (cause instanceof ApiError && cause.status === 401) {
     state.value.token = "";
-    ++catalogVersion;
-    lists.value = [];
-    tags.value = [];
-    listsLoading.value = false;
+    clearResources();
     await native("clearCredentials");
     error.value = "Your session expired. Sign in to continue.";
   }
@@ -97,41 +115,64 @@ async function run(task: () => Promise<void>) {
     busy.value = false;
   }
 }
-async function catalog() {
-  const version = ++catalogVersion;
+function currentAccount(version: number, server: string, token: string) {
+  return version === catalogVersion && server === state.value.server && token === state.value.token;
+}
+async function loadLists() {
+  const version = catalogVersion;
   const { server, token } = state.value;
   listsLoading.value = true;
   try {
-    await Promise.all([
-      allItems<List>("/api/lists")
-        .then(async (result) => {
-          if (version !== catalogVersion || token !== state.value.token) return;
-          lists.value = result;
-          await native("cacheLists", { server, token, lists: result });
-          await native("markTiming", { phase: "lists_loaded" });
-        })
-        .finally(() => {
-          if (version === catalogVersion) listsLoading.value = false;
-        }),
-      allItems<Tag>("/api/tags").then((result) => {
-        if (version === catalogVersion && token === state.value.token) tags.value = result;
-      }),
-    ]);
+    const result = await allItems<List>("/api/lists");
+    if (!currentAccount(version, server, token)) return;
+    lists.value = result;
+    await native("cacheLists", { server, token, lists: result });
+    await native("markTiming", { phase: "lists_loaded" });
   } catch (cause) {
-    if (version === catalogVersion && token === state.value.token) throw cause;
+    if (currentAccount(version, server, token)) {
+      await failure(cause);
+      throw cause;
+    }
+  } finally {
+    if (currentAccount(version, server, token)) listsLoading.value = false;
   }
 }
+async function loadTags() {
+  const version = catalogVersion;
+  const { server, token } = state.value;
+  try {
+    const result = await allItems<Tag>("/api/tags");
+    if (currentAccount(version, server, token)) tags.value = result;
+  } catch (cause) {
+    if (currentAccount(version, server, token)) {
+      await failure(cause);
+      throw cause;
+    }
+  }
+}
+async function catalog() {
+  await Promise.all([listResource.ensure(), tagResource.ensure()]).catch(() => {});
+}
+async function ensureFeed() {
+  await feedResource.ensure().catch(() => {});
+}
 async function load(more = false) {
+  await (more ? fetchFeed(true) : feedResource.refresh()).catch(() => {});
+}
+async function fetchFeed(more = false) {
   if (more && loading.value) return;
   const version = ++loadVersion;
+  const { server, token } = state.value;
+  const account = catalogVersion;
+  const current = () => version === loadVersion && currentAccount(account, server, token);
   loading.value = true;
   error.value = "";
   const offset = more ? bookmarks.value.length : 0;
+  const query = bookmarkQuery(q.value, listFilter.value, tagFilter.value, offset);
   try {
-    const page = await api<{ items: BookmarkItem[]; total: number }>(
-      bookmarkQuery(q.value, listFilter.value, tagFilter.value, offset),
-    );
-    if (version !== loadVersion) return;
+    const page = await api<{ items: BookmarkItem[]; total: number }>(query);
+    if (!current() || query !== bookmarkQuery(q.value, listFilter.value, tagFilter.value, offset))
+      return;
     bookmarks.value = more
       ? [
           ...bookmarks.value,
@@ -140,13 +181,20 @@ async function load(more = false) {
       : page.items;
     total.value = page.total;
   } catch (cause) {
-    if (version === loadVersion) await failure(cause);
+    if (current()) {
+      await failure(cause);
+      throw cause;
+    }
   } finally {
-    if (version === loadVersion) loading.value = false;
+    if (current()) loading.value = false;
   }
 }
 async function refresh() {
-  await Promise.all([load(), catalog().catch(failure)]);
+  await Promise.all([
+    load(),
+    listResource.refresh().catch(() => {}),
+    tagResource.refresh().catch(() => {}),
+  ]);
 }
 async function login() {
   if (!email.value || !password.value) return;
@@ -156,6 +204,7 @@ async function login() {
     } finally {
       password.value = "";
     }
+    clearResources();
     state.value = await native<NativeState>("getState");
     lists.value = state.value.lists;
     if (state.value.pendingUrl) beginShare(state.value.pendingUrl);
@@ -163,7 +212,7 @@ async function login() {
       screen.value = "bookmarks";
       await load();
     }
-    void catalog().catch(failure);
+    void catalog();
   });
 }
 function beginShare(value: string) {
@@ -188,8 +237,8 @@ async function navigate(next: Screen) {
     selectedLists.value = [];
     saved.value = false;
   }
-  if (next === "bookmarks") await load();
-  if (next === "lists" || next === "settings" || next === "add") await run(catalog);
+  if (next === "bookmarks") void ensureFeed();
+  if (next === "lists" || next === "settings" || next === "add") void catalog();
 }
 function toggleList(id: string) {
   if (busy.value) return;
@@ -204,6 +253,8 @@ async function save() {
       "POST",
       { url: url.value.trim(), listIds: selectedLists.value },
     );
+    feedResource.invalidate();
+    void listResource.refresh().catch(() => {});
     savedDuplicate.value = result.alreadyExists;
     notice.value = result.alreadyExists ? "Already saved. Moved to the top." : "Saved to CloudKeep";
     if (shared.value) await native("clearPendingSharedUrl");
@@ -219,7 +270,7 @@ async function endShare(returnToApp: boolean) {
     url.value = "";
     screen.value = "bookmarks";
     if (returnToApp) await native("finishShare");
-    else await load();
+    else if (!resumePending) void ensureFeed();
   });
 }
 async function showDetail(id: string) {
@@ -242,6 +293,8 @@ async function detailList(id: string) {
     bookmark.listIds = exists
       ? bookmark.listIds.filter((value) => value !== id)
       : [...bookmark.listIds, id];
+    feedResource.invalidate();
+    void listResource.refresh().catch(() => {});
   });
 }
 async function addTag() {
@@ -257,14 +310,16 @@ async function addTag() {
       result.tag,
     ];
     tagName.value = "";
-    await catalog();
+    feedResource.invalidate();
+    void tagResource.refresh().catch(() => {});
   });
 }
 async function removeTag(id: string) {
   await run(async () => {
     await api(`/api/bookmarks/${detail.value!.id}/tags/${id}`, "DELETE");
     detail.value!.tags = detail.value!.tags.filter((tag) => tag.id !== id);
-    await catalog();
+    feedResource.invalidate();
+    void tagResource.refresh().catch(() => {});
   });
 }
 function deleteBookmark(id: string) {
@@ -273,7 +328,9 @@ function deleteBookmark(id: string) {
     action: async () => {
       await api(`/api/bookmarks/${id}`, "DELETE");
       if (screen.value === "detail") screen.value = "bookmarks";
-      await refresh();
+      feedResource.invalidate();
+      void listResource.refresh().catch(() => {});
+      void ensureFeed();
     },
   };
 }
@@ -287,7 +344,7 @@ async function saveList() {
     );
     editingList.value = "";
     newListName.value = "";
-    await catalog();
+    void listResource.refresh().catch(() => {});
   });
 }
 function deleteList(list: List) {
@@ -304,7 +361,8 @@ function deleteList(list: List) {
         editingList.value = "";
         newListName.value = "";
       }
-      await catalog();
+      feedResource.invalidate();
+      void listResource.refresh().catch(() => {});
     },
   };
 }
@@ -314,6 +372,7 @@ async function confirmDelete() {
   if (action) await run(action);
 }
 async function filterList(id: string) {
+  feedResource.invalidate();
   listFilter.value = id;
   filterPanel.value = false;
   screen.value = "bookmarks";
@@ -346,13 +405,7 @@ async function logout() {
       await native("clearCredentials");
       state.value.token = "";
       state.value.defaultList = "";
-      ++loadVersion;
-      ++catalogVersion;
-      listsLoading.value = false;
-      bookmarks.value = [];
-      lists.value = [];
-      tags.value = [];
-      detail.value = undefined;
+      clearResources();
       listFilter.value = "";
       tagFilter.value = "";
       q.value = "";
@@ -426,6 +479,7 @@ function receiveTheme(value: unknown) {
 }
 function search(value: string) {
   q.value = value;
+  feedResource.invalidate();
   if (!value) void load();
 }
 async function clearFilters() {
@@ -433,6 +487,7 @@ async function clearFilters() {
   await allFilters();
 }
 async function allFilters() {
+  feedResource.invalidate();
   listFilter.value = "";
   tagFilter.value = "";
   await load();
@@ -440,18 +495,43 @@ async function allFilters() {
 async function selectList(id: string) {
   await filterList(listFilter.value === id ? "" : id);
 }
+function revalidate() {
+  if (!state.value.token || shared.value || busy.value) return;
+  const pending = resumePending;
+  resumePending = undefined;
+  if (pending === "all") void refresh();
+  else {
+    void ensureFeed();
+    void listResource.refresh().catch(() => {});
+  }
+}
+function receiveResume(elapsed: unknown, changed: unknown) {
+  const stale = typeof elapsed === "number" && elapsed > 60_000;
+  if (!stale && changed !== true) {
+    if (state.value.token && !shared.value && !busy.value) void ensureFeed();
+    return;
+  }
+  feedResource.invalidate();
+  if (stale || resumePending === "all") resumePending = "all";
+  else resumePending = "saved";
+  revalidate();
+}
+watch([shared, busy], () => {
+  if (resumePending) revalidate();
+});
 const shareEvents = lynx.getJSModule("GlobalEventEmitter");
 function receiveShare(value: unknown) {
   if (typeof value !== "string" || !value) return;
   if (shared.value && url.value === value && !saved.value) return;
   beginShare(value);
-  if (state.value.token) void catalog().catch(failure);
+  if (state.value.token) void catalog();
 }
 onMounted(async () => {
   // Register before reading state; the native handshake replays shares received during startup.
   shareEvents.addListener("cloudkeepShare", receiveShare);
   shareEvents.addListener("cloudkeepTheme", receiveTheme);
   shareEvents.addListener("cloudkeepBack", back);
+  shareEvents.addListener("cloudkeepResume", receiveResume);
   try {
     state.value = await native<NativeState>("getState");
     server.value = state.value.server;
@@ -462,7 +542,7 @@ onMounted(async () => {
     void native("markTiming", { phase: "js_state_ready" });
     await native("frontendReady");
     if (state.value.token) {
-      void catalog().catch(failure);
+      void catalog();
       if (!shared.value) void load();
     }
   } catch (cause) {
@@ -475,6 +555,7 @@ onUnmounted(() => {
   shareEvents.removeListener("cloudkeepShare", receiveShare);
   shareEvents.removeListener("cloudkeepTheme", receiveTheme);
   shareEvents.removeListener("cloudkeepBack", back);
+  shareEvents.removeListener("cloudkeepResume", receiveResume);
   clearTimeout(noticeTimer);
 });
 </script>
