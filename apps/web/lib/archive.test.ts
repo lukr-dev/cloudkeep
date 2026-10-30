@@ -5,11 +5,12 @@ import { Hono } from "hono";
 import type { CloudEnv } from "void";
 import { createDb } from "void/db";
 import { GET, POST } from "../routes/api/bookmarks/index.ts";
-import { PATCH } from "../routes/api/bookmarks/[id]/index.ts";
+import { GET as lookup } from "../routes/api/bookmarks/lookup.ts";
+import { GET as detail, PATCH } from "../routes/api/bookmarks/[id]/index.ts";
 import { GET as getLists } from "../routes/api/lists/index.ts";
 import { GET as getTags } from "../routes/api/tags/index.ts";
 import { GET as getCloud } from "../routes/api/tags/cloud.ts";
-import type { Bookmark, BookmarkItem, List, Tag } from "./api.ts";
+import type { Bookmark, BookmarkItem, BookmarkLookup, BookmarkCreate, List, Tag } from "./api.ts";
 
 let database: ReturnType<typeof createDb>;
 vi.mock("void/db", async (original) => ({
@@ -44,6 +45,7 @@ const listId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const app = new Hono<CloudEnv>();
 app.use("*", async (c, next) => {
+  if (c.req.header("x-anonymous")) return next();
   c.set("user", {
     id: userId,
     email: "test@example.com",
@@ -56,6 +58,8 @@ app.use("*", async (c, next) => {
 });
 app.get("/api/bookmarks", async (c) => (await GET(c)) as Response);
 app.post("/api/bookmarks", async (c) => (await POST(c)) as Response);
+app.get("/api/bookmarks/lookup", async (c) => (await lookup(c)) as Response);
+app.get("/api/bookmarks/:id", async (c) => (await detail(c)) as Response);
 app.patch("/api/bookmarks/:id", async (c) => (await PATCH(c)) as Response);
 app.get("/api/lists", async (c) => (await getLists(c)) as Response);
 app.get("/api/tags", async (c) => (await getTags(c)) as Response);
@@ -152,15 +156,84 @@ it("archives and restores without editing metadata, filters totals, and updates 
 });
 it("re-saving an archived URL restores it and keeps memberships", async () => {
   await request(`/api/bookmarks/${id}`, "PATCH", { archived: true });
-  const result = await request<{ bookmark: Bookmark; alreadyExists: boolean }>(
-    "/api/bookmarks",
-    "POST",
-    { url: "https://example.com/archive-test" },
-  );
+  const result = await request<BookmarkCreate>("/api/bookmarks", "POST", {
+    url: "https://example.com/archive-test",
+  });
   expect(result.alreadyExists).toBe(true);
-  expect(result.bookmark).toMatchObject({ id, archivedAt: null });
+  expect(result.bookmark).toMatchObject({ id, archivedAt: null, listIds: [listId] });
   expect(await request(`/api/bookmarks?listId=${listId}&tag=design`)).toMatchObject({
     items: [{ id }],
     total: 1,
   });
+});
+
+it("looks up normalized URLs including archived bookmarks and their lists", async () => {
+  await request(`/api/bookmarks/${id}`, "PATCH", { archived: true });
+  const result = await request<BookmarkLookup>(
+    `/api/bookmarks/lookup?url=${encodeURIComponent("https://EXAMPLE.com/archive-test?utm_source=extension&utm_medium=tab#section")}`,
+  );
+  expect(result).toEqual({
+    bookmark: {
+      id,
+      url: "https://example.com/archive-test",
+      title: "Archive test",
+      archivedAt: expect.any(Number),
+      listIds: [listId],
+    },
+  });
+});
+it("returns null for unknown URLs, other users' bookmarks and unsupported tabs", async () => {
+  for (const url of [
+    "https://example.com/missing",
+    "https://example.com/private",
+    "chrome://newtab",
+    "file:///tmp/test",
+    "https://localhost",
+    "https://127.0.0.1",
+    "http://[::1]",
+    "https://host.internal",
+    "not a URL",
+    "",
+  ]) {
+    expect(await request(`/api/bookmarks/lookup?url=${encodeURIComponent(url)}`)).toEqual({
+      bookmark: null,
+    });
+  }
+});
+it("requires authentication even for an invalid lookup URL", async () => {
+  const response = await app.request("/api/bookmarks/lookup?url=chrome://newtab", {
+    headers: { "x-anonymous": "1" },
+  });
+  expect(response.status).toBe(401);
+});
+it("returns full memberships on creation and merges them when re-saving", async () => {
+  const binding = await runtime.getD1Database("DB");
+  const extraListId = crypto.randomUUID();
+  await binding
+    .prepare(
+      "INSERT INTO lists (id, user_id, name, created_at, updated_at) VALUES (?, ?, 'Extra', 1, 1)",
+    )
+    .bind(extraListId, userId)
+    .run();
+  async function save(body: unknown, status: number) {
+    const response = await app.request("/api/bookmarks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(status);
+    return response.json() as Promise<BookmarkCreate>;
+  }
+  const url = "https://example.com/new-memberships";
+  const created = await save({ url, listIds: [listId] }, 201);
+  expect(created.alreadyExists).toBe(false);
+  expect(created.bookmark.listIds).toEqual([listId]);
+  await request(`/api/bookmarks/${created.bookmark.id}`, "PATCH", { archived: true });
+  const merged = await save({ url, listIds: [extraListId, listId] }, 200);
+  expect(merged.alreadyExists).toBe(true);
+  expect(merged.bookmark.archivedAt).toBeNull();
+  expect(merged.bookmark.createdAt).toBeGreaterThan(created.bookmark.createdAt);
+  expect(merged.bookmark.listIds.sort()).toEqual([listId, extraListId].sort());
+  expect((await save({ url }, 200)).bookmark.listIds.sort()).toEqual([listId, extraListId].sort());
+  expect((await save({ url: "https://example.com/no-lists" }, 201)).bookmark.listIds).toEqual([]);
 });

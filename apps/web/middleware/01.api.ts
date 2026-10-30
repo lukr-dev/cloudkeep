@@ -1,3 +1,4 @@
+import { extensionAuthOrigin } from "../lib/extension-auth.ts";
 import { defineMiddleware } from "void";
 import { HTTPException } from "hono/http-exception";
 
@@ -11,6 +12,7 @@ export default defineMiddleware(async (c, next) => {
     if (
       origin &&
       origin !== new URL(c.req.url).origin &&
+      !extensionAuthOrigin(c.req.raw) &&
       !c.req.header("authorization")?.startsWith("Bearer ")
     )
       return c.json({ error: "Untrusted origin" }, 403);

@@ -30,6 +30,12 @@ export type Bookmark = {
   createdAt: number;
   updatedAt: number;
 };
+export type BookmarkLookup = {
+  bookmark:
+    | (Pick<Bookmark, "id" | "title" | "archivedAt"> & { url: string; listIds: string[] })
+    | null;
+};
+export type BookmarkCreate = { bookmark: Bookmark & { listIds: string[] }; alreadyExists: boolean };
 export type Audio = {
   kind: "short" | "full";
   status: "pending" | "processing" | "done" | "failed";
