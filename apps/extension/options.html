@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CloudKeep settings</title>
+  </head>
+  <body class="options">
+    <main>
+      <h1>CloudKeep</h1>
+      <p id="status" role="status"></p>
+      <form id="signin">
+        <label>Server URL<input id="server" type="url" required /></label
+        ><label>Email<input id="email" type="email" autocomplete="username" required /></label
+        ><label
+          >Password<input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><button>Sign in</button>
+      </form>
+      <button id="signout" hidden>Sign out</button
+      ><label class="badge-option"
+        ><input id="badge" type="checkbox" /> Show a badge on pages already in CloudKeep (looks up
+        each page you visit)</label
+      >
+      <p id="error" role="alert"></p>
+    </main>
+    <script type="module" src="/src/options.ts"></script>
+  </body>
+</html>

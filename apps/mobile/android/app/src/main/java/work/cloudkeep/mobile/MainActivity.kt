@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import android.graphics.Color
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
@@ -23,6 +24,7 @@ class MainActivity : Activity() {
     private var container: FrameLayout? = null
     private var shareListenerReady = false
     private var dark = false
+    private var pausedAt: Long? = null
     /** Set by the frontend while Back should navigate inside the app instead of leaving it. */
     var backHandler = false
 
@@ -140,8 +142,24 @@ class MainActivity : Activity() {
         view.renderTemplateUrl("main.lynx.bundle", "")
     }
 
-    override fun onResume() { super.onResume(); current = WeakReference(this); lynxView?.onEnterForeground() }
-    override fun onPause() { lynxView?.onEnterBackground(); super.onPause() }
+    override fun onResume() {
+        super.onResume()
+        current = WeakReference(this)
+        lynxView?.onEnterForeground()
+        if (shareListenerReady) {
+            // Deliver the picker first so background refreshes wait until the share is finished.
+            deliverShare()
+            val elapsed = pausedAt?.let { SystemClock.elapsedRealtime() - it } ?: 0L
+            val changed = (application as CloudKeepApplication).bookmarksChanged.getAndSet(false)
+            lynxView?.sendGlobalEvent("cloudkeepResume", JavaOnlyArray.of(elapsed.toDouble(), changed))
+        }
+        pausedAt = null
+    }
+    override fun onPause() {
+        pausedAt = SystemClock.elapsedRealtime()
+        lynxView?.onEnterBackground()
+        super.onPause()
+    }
     override fun onDestroy() {
         lynxView?.destroy()
         if (current.get() === this) current.clear()

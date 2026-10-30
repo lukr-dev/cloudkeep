@@ -1,14 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
 import { Link, useParams, useRouter } from "@void/vue";
-import {
-  allItems,
-  api,
-  message,
-  type Bookmark,
-  type BookmarkDetail,
-  type List,
-} from "../../lib/api.ts";
+import { api, message, type Bookmark, type BookmarkDetail } from "../../lib/api.ts";
+import { listsStore } from "../../composables/lists.ts";
 import { useFeatures } from "../../composables/session.ts";
 import { useTask } from "../../composables/task.ts";
 import Icon from "../../components/Icon.vue";
@@ -31,7 +25,7 @@ const text = ref("");
 const params = useParams<{ id: string }>();
 const router = useRouter();
 const bookmark = ref<BookmarkDetail | null>(null);
-const lists = ref<List[]>([]);
+const { lists } = listsStore;
 const title = ref("");
 const description = ref("");
 const tagName = ref("");
@@ -58,14 +52,23 @@ function discard() {
   title.value = bookmark.value?.title ?? "";
   description.value = bookmark.value?.description ?? "";
 }
-async function refreshLists() {
-  lists.value = await allItems<List>("/api/lists");
-}
+let request = 0;
+let disposed = false;
+let controller: AbortController | undefined;
 const path = `/api/bookmarks/${params.id}` as const;
 async function load(initial = false) {
+  const current = ++request;
+  controller?.abort();
+  controller = new AbortController();
   loadError.value = "";
   try {
-    const next = (await api<{ bookmark: BookmarkDetail }>(path)).bookmark;
+    const next = (await api<{ bookmark: BookmarkDetail }>(path, { signal: controller.signal }))
+      .bookmark;
+    if (current !== request || disposed) return;
+    const settled =
+      bookmark.value &&
+      ["pending", "processing"].includes(bookmark.value.status) &&
+      !["pending", "processing"].includes(next.status);
     // Metadata can arrive while editing. Refresh untouched fields and keep unsaved edits.
     if (initial || title.value === (bookmark.value?.title ?? "")) title.value = next.title ?? "";
     if (initial || description.value === (bookmark.value?.description ?? ""))
@@ -73,12 +76,20 @@ async function load(initial = false) {
     if (initial || text.value === (bookmark.value?.noteText ?? ""))
       text.value = next.noteText ?? "";
     bookmark.value = next;
-    if (initial) await refreshLists();
+    if (initial) await listsStore.ensure();
+    if (settled) await listsStore.refresh().catch(() => {});
   } catch (cause) {
-    loadError.value = message(cause);
+    if (
+      current === request &&
+      !disposed &&
+      !(cause instanceof Error && cause.name === "AbortError")
+    )
+      loadError.value = message(cause);
   } finally {
-    loading.value = false;
-    schedule();
+    if (current === request && !disposed) {
+      loading.value = false;
+      schedule();
+    }
   }
 }
 const schedule = usePolling(
@@ -91,6 +102,10 @@ const schedule = usePolling(
         bookmark.value.audio?.some((a) => ["pending", "processing"].includes(a.status)))),
 );
 onMounted(() => void load(true));
+onUnmounted(() => {
+  disposed = true;
+  controller?.abort();
+});
 function save() {
   return run(async () => {
     await api(path, {
@@ -103,6 +118,7 @@ function save() {
           : {}),
       },
     });
+    schedule(true);
     await load();
     notice.value = "Saved";
   });
@@ -126,12 +142,13 @@ function membership(id: string) {
       method: bookmark.value?.listIds.includes(id) ? "DELETE" : "PUT",
       ...(bookmark.value?.listIds.includes(id) ? {} : { body: {} }),
     });
-    await Promise.all([load(), refreshLists()]);
+    await Promise.all([load(), listsStore.refresh()]);
   });
 }
 function fullSummary() {
   return run(async () => {
     await api(`${path}/audio/full`, { method: "POST", body: {} });
+    schedule(true);
     await load();
   });
 }
@@ -141,6 +158,7 @@ function reprocess() {
       await api(`${path}/reprocess`, { method: "POST", body: {} });
       notice.value = "Processing again. Your edits are kept.";
     } finally {
+      schedule(true);
       await load();
     }
   });
@@ -150,10 +168,13 @@ function archive() {
     if (!bookmark.value) return;
     const archived = bookmark.value.archivedAt === null;
     const result = await api<{ bookmark: Bookmark }>(path, { method: "PATCH", body: { archived } });
+    ++request;
+    controller?.abort();
     bookmark.value.archivedAt = result.bookmark.archivedAt;
     bookmark.value.updatedAt = result.bookmark.updatedAt;
+    schedule();
     notice.value = archived ? "Bookmark archived" : "Bookmark restored";
-    await refreshLists();
+    await listsStore.refresh();
   });
 }
 function back() {
@@ -164,6 +185,9 @@ function remove() {
   if (!window.confirm("Delete this bookmark? This can’t be undone.")) return;
   return run(async () => {
     await api(path, { method: "DELETE" });
+    ++request;
+    controller?.abort();
+    void listsStore.refresh().catch(() => {});
     await router.visit("/");
   });
 }

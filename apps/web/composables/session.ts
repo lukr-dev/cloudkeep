@@ -13,3 +13,5 @@ export function useFeatures() {
   if (!features) throw new Error("Features require the app layout");
   return features;
 }
+
+export const setupTokenRequiredKey: InjectionKey<Ref<boolean>> = Symbol("setupTokenRequired");

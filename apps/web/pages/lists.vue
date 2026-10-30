@@ -2,26 +2,22 @@
 import ListSettings from "../components/ListSettings.vue";
 import { onMounted, ref } from "vue";
 import { Link } from "@void/vue";
-import { allItems, api, type List } from "../lib/api.ts";
+import { api, type List } from "../lib/api.ts";
 import { filterUrl } from "../lib/filters.ts";
+import { listsStore } from "../composables/lists.ts";
 import { useTask } from "../composables/task.ts";
 const settingsId = ref("");
-const lists = ref<List[]>([]);
+const { lists, loaded, error: listsError } = listsStore;
 const name = ref("");
 const editId = ref("");
 const editName = ref("");
-const loaded = ref(false);
 const { busy, error, notice, run } = useTask();
-async function load() {
-  lists.value = await allItems<List>("/api/lists");
-  loaded.value = true;
-}
-onMounted(() => void run(load));
+onMounted(() => void run(listsStore.ensure));
 function create() {
   return run(async () => {
     await api("/api/lists", { method: "POST", body: { name: name.value } });
     name.value = "";
-    await load();
+    await listsStore.refresh();
     notice.value = "List created";
   });
 }
@@ -29,7 +25,7 @@ function rename(id: string) {
   return run(async () => {
     await api(`/api/lists/${id}`, { method: "PATCH", body: { name: editName.value } });
     editId.value = "";
-    await load();
+    await listsStore.refresh();
     notice.value = "List renamed";
   });
 }
@@ -37,7 +33,7 @@ function remove(list: List) {
   if (window.confirm(`Delete “${list.name}”? The bookmarks in it stay saved.`))
     return run(async () => {
       await api(`/api/lists/${list.id}`, { method: "DELETE" });
-      await load();
+      await listsStore.refresh();
     });
 }
 </script>
@@ -61,11 +57,11 @@ function remove(list: List) {
       />
       <button class="primary" :disabled="busy">Create</button>
     </form>
-    <div v-if="error" class="alert" role="alert">
-      <span>{{ error }}</span
-      ><button v-if="!loaded" @click="run(load)">Try again</button>
+    <div v-if="error || listsError" class="alert" role="alert">
+      <span>{{ error || listsError }}</span
+      ><button @click="run(listsStore.refresh)">Try again</button>
     </div>
-    <div v-if="!loaded && !error" class="rows" aria-hidden="true">
+    <div v-if="!loaded && !error && !listsError" class="rows" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="skeleton placeholder"></div>
     </div>
     <div v-else-if="loaded && !lists.length" class="empty fade-in">

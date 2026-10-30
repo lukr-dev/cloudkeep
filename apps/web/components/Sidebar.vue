@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { Link, useRouter } from "@void/vue";
-import { allItems, message, type List } from "../lib/api.ts";
+import { type List } from "../lib/api.ts";
 import { filterUrl, readFilters, type Filters } from "../lib/filters.ts";
+import { listsStore } from "../composables/lists.ts";
 import { useFeatures } from "../composables/session.ts";
 import Icon from "./Icon.vue";
 const props = defineProps<{
@@ -25,20 +26,12 @@ const dashboard = computed(() => router.path === "/");
 const filters = computed(
   () => props.filters ?? readFilters(dashboard.value ? router.query : new URLSearchParams()),
 );
-const loaded = ref<List[]>([]);
-const items = computed(() => props.lists ?? loaded.value);
-const error = ref("");
-async function load() {
-  error.value = "";
-  try {
-    loaded.value = await allItems<List>("/api/lists");
-  } catch (cause) {
-    error.value = message(cause);
-  }
+const { lists, error } = listsStore;
+const items = computed(() => props.lists ?? lists.value);
+function load() {
+  return listsStore.refresh().catch(() => {});
 }
-onMounted(() => {
-  if (props.lists === undefined) void load();
-});
+onMounted(() => void listsStore.ensure().catch(() => {}));
 </script>
 <template>
   <aside class="sidebar" aria-label="Filters">

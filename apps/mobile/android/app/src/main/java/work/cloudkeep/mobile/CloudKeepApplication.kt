@@ -7,8 +7,10 @@ import com.lynx.service.image.LynxImageService
 import com.lynx.tasm.LynxEnv
 import com.lynx.tasm.service.LynxServiceCenter
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CloudKeepApplication : Application() {
+    val bookmarksChanged = AtomicBoolean(false)
     val shares by lazy { ShareStore(this) }
     val store by lazy {
         ShareTiming.mark("secure_store_start")
