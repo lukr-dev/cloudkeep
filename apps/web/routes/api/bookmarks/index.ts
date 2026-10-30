@@ -177,21 +177,34 @@ export const POST = defineHandler.withValidator({ body: createBookmark })(async 
         )
         .onConflictDoNothing(),
     ]);
-    return c.json({ bookmark: publicBookmark(updated[0]!), alreadyExists: true }, 200);
+    const links = await db
+      .select({ listId: bookmarkLists.listId })
+      .from(bookmarkLists)
+      .where(eq(bookmarkLists.bookmarkId, updated[0]!.id));
+    return c.json(
+      {
+        bookmark: { ...publicBookmark(updated[0]!), listIds: links.map((link) => link.listId) },
+        alreadyExists: true,
+      },
+      200,
+    );
   }
   const queued = await enqueue({ bookmarkId: id, userId, runId });
   return c.json(
     {
       alreadyExists: false,
-      bookmark: publicBookmark({
-        ...created[0],
-        ...(queued
-          ? {}
-          : {
-              status: "failed" as const,
-              error: "Could not enqueue processing; reprocess to retry",
-            }),
-      }),
+      bookmark: {
+        ...publicBookmark({
+          ...created[0],
+          ...(queued
+            ? {}
+            : {
+                status: "failed" as const,
+                error: "Could not enqueue processing; reprocess to retry",
+              }),
+        }),
+        listIds: body.listIds,
+      },
     },
     201,
   );
