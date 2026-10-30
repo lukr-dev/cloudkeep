@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Save to CloudKeep</title>
+  </head>
+  <body class="popup">
+    <main>
+      <h1 id="status" role="status">Saving…</h1>
+      <p id="page" class="muted"></p>
+      <input
+        id="filter"
+        type="search"
+        placeholder="Filter lists…"
+        aria-label="Filter lists"
+        autofocus
+      />
+      <div id="lists" aria-label="Lists"></div>
+      <p id="error" role="alert"></p>
+      <button id="settings" hidden>Sign in to CloudKeep</button>
+      <footer>
+        <a id="open" target="_blank" rel="noopener">Open CloudKeep ↗</a
+        ><button id="undo" hidden>Undo</button>
+      </footer>
+    </main>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>
