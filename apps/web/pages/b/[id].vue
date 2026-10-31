@@ -21,6 +21,13 @@ const audioKinds = computed(() => ({
   full: bookmark.value?.audio?.find((a) => a.kind === "full"),
 }));
 const canRead = computed(() => bookmark.value?.type === "link" && !!bookmark.value.contentText);
+const truncationHint = computed(() => {
+  if (bookmark.value?.pageTruncated)
+    return bookmark.value.contentTruncated
+      ? "This page was larger than 4 MiB. Only the beginning was saved, with article text limited to 20,000 characters."
+      : "This page was larger than 4 MiB, so only the beginning was saved.";
+  return bookmark.value?.contentTruncated ? "Article text was truncated at 20,000 characters." : "";
+});
 const text = ref("");
 const params = useParams<{ id: string }>();
 const router = useRouter();
@@ -362,6 +369,9 @@ function remove() {
             >
               {{ readerOpen ? "Close reader" : "Read article" }}
             </button>
+            <span v-if="canRead && truncationHint" class="hint" :title="truncationHint">
+              Partial text
+            </span>
           </div>
           <p v-if="audioShown" class="hint">
             Full summary creates a detailed spoken summary; run it again to replace it.
@@ -383,9 +393,7 @@ function remove() {
             </template>
           </div>
           <article v-if="canRead && readerOpen" class="reader">
-            <p v-if="bookmark.contentTruncated" class="hint">
-              Article text was truncated at 20,000 characters.
-            </p>
+            <p v-if="truncationHint" class="hint">{{ truncationHint }}</p>
             <p v-for="(paragraph, index) in bookmark.contentText!.split(/\n\n+/)" :key="index">
               {{ paragraph }}
             </p>

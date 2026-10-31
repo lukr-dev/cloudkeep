@@ -22,6 +22,7 @@ export type Bookmark = {
   contentText: string | null;
   summary: string | null;
   contentTruncated: boolean;
+  pageTruncated: boolean;
   hasAudio?: boolean;
   processingListId: string | null;
   status: "pending" | "processing" | "done" | "failed";

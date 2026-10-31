@@ -11,6 +11,48 @@ import {
 } from "../lib/api.ts";
 import { useFeatures, useSession } from "../composables/session.ts";
 import { useTask } from "../composables/task.ts";
+type ApiKey = {
+  id: string;
+  name: string | null;
+  prefix: string | null;
+  start: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+};
+const apiKeys = ref<ApiKey[]>([]);
+const apiKeyName = ref("");
+const apiKeyDays = ref(90);
+const newApiKey = ref<{ id: string; key: string } | null>(null);
+function createApiKey() {
+  return run(async () => {
+    const { key, ...item } = await api<ApiKey & { key: string }>("/api/auth/api-key/create", {
+      method: "POST",
+      body: {
+        name: apiKeyName.value.trim(),
+        expiresIn: apiKeyDays.value ? apiKeyDays.value * 86_400 : null,
+      },
+    });
+    apiKeys.value.unshift(item);
+    newApiKey.value = { id: item.id, key };
+    apiKeyName.value = "";
+  });
+}
+function revokeApiKey(key: ApiKey) {
+  if (!confirm(`Revoke “${key.name}”? Apps using this key will lose access immediately.`)) return;
+  return run(async () => {
+    await api("/api/auth/api-key/delete", { method: "POST", body: { keyId: key.id } });
+    apiKeys.value = apiKeys.value.filter((item) => item.id !== key.id);
+    if (newApiKey.value?.id === key.id) newApiKey.value = null;
+    notice.value = "API key revoked";
+  });
+}
+function copyApiKey() {
+  return run(async () => {
+    if (!newApiKey.value) return;
+    await navigator.clipboard.writeText(newApiKey.value.key);
+    notice.value = "API key copied";
+  });
+}
 const user = useSession();
 const features = useFeatures();
 const settings = ref<Settings | null>(null);
@@ -54,12 +96,14 @@ function populate(value: Settings) {
   keys.openrouter = "";
 }
 async function load() {
-  const [value, templates] = await Promise.all([
+  const [value, templates, accessKeys] = await Promise.all([
     api<Settings>("/api/settings"),
     api<Prompts>("/api/settings/prompts"),
+    api<{ apiKeys: ApiKey[] }>("/api/auth/api-key/list?sortBy=createdAt&sortDirection=desc"),
   ]);
   populate(value);
   prompts.value = templates;
+  apiKeys.value = accessKeys.apiKeys;
 }
 onMounted(() => void run(load));
 function save() {
@@ -252,6 +296,85 @@ function savePrompt(kind: "tagging" | "summary" | "detailed_summary", reset = fa
           </div>
         </div>
       </form>
+      <section class="group fade-in" aria-labelledby="api-keys-heading">
+        <div class="intro">
+          <h2 id="api-keys-heading">API keys</h2>
+          <p>
+            Connect scripts and other apps to your CloudKeep account. Each key grants full API
+            access to your account.
+          </p>
+        </div>
+        <div class="controls stack">
+          <div v-if="newApiKey" class="field" role="status">
+            <label for="new-api-key">Copy your new API key</label>
+            <p class="hint">Shown only once. Save it before leaving this page.</p>
+            <textarea
+              id="new-api-key"
+              :value="newApiKey.key"
+              class="mono-input"
+              readonly
+              rows="3"
+              spellcheck="false"
+            />
+            <div class="row">
+              <button type="button" :disabled="busy" @click="copyApiKey">Copy key</button>
+              <button type="button" class="ghost" @click="newApiKey = null">Done</button>
+            </div>
+          </div>
+          <form class="stack" @submit.prevent="createApiKey">
+            <div class="field">
+              <label for="api-key-name">Key name</label>
+              <input
+                id="api-key-name"
+                v-model="apiKeyName"
+                placeholder="Bookmark import"
+                required
+                maxlength="100"
+              />
+            </div>
+            <div class="field">
+              <label for="api-key-expiry">Expires after</label>
+              <select id="api-key-expiry" v-model="apiKeyDays">
+                <option :value="30">30 days</option>
+                <option :value="90">90 days</option>
+                <option :value="365">1 year</option>
+                <option :value="0">Never</option>
+              </select>
+            </div>
+            <div>
+              <button class="primary" :disabled="busy || !!newApiKey">Create API key</button>
+            </div>
+          </form>
+          <p class="hint">Send your key as <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+          <p v-if="!apiKeys.length" class="muted small">No API keys yet.</p>
+          <div v-for="key in apiKeys" :key="key.id" class="row">
+            <div class="grow">
+              <strong>{{ key.name }}</strong>
+              <p class="hint">
+                <code>{{ key.start ?? key.prefix }}…</code> · Created
+                {{ new Date(key.createdAt).toLocaleDateString() }}
+              </p>
+              <p class="hint">
+                {{
+                  key.expiresAt
+                    ? (new Date(key.expiresAt).getTime() <= Date.now() ? "Expired " : "Expires ") +
+                      new Date(key.expiresAt).toLocaleDateString()
+                    : "Never expires"
+                }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="ghost"
+              :disabled="busy"
+              :aria-label="`Revoke ${key.name}`"
+              @click="revokeApiKey(key)"
+            >
+              Revoke
+            </button>
+          </div>
+        </div>
+      </section>
       <section class="group fade-in">
         <div class="intro">
           <h2>Prompts</h2>

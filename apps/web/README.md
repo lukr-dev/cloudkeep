@@ -329,3 +329,21 @@ Provider contracts verified against the installed Workers types and official doc
 [OpenAI speech](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create),
 and [OpenRouter TTS](https://openrouter.ai/docs/guides/overview/multimodal/tts)
 (binary output; its default format is PCM, so CloudKeep requests MP3 explicitly).
+
+## Personal API keys
+
+In **Settings → API keys**, create a named key with a 30-day, 90-day, one-year, or no expiry. Copy the key immediately: it is shown only once. The list shows its name, starting characters and expiry, with a Revoke button. Signing out does not revoke API keys.
+
+The official `@better-auth/api-key` plugin (matching Better Auth 1.7.10) manages generation, hashing, storage, expiry, revocation and per-key rate limiting. Void generates the plugin's `apikey` schema alongside its other auth tables. No application-owned key table or cryptographic implementation is needed.
+
+Send `Authorization: Bearer ck_…` or `x-api-key: ck_…` to the JSON API. A small application middleware calls Better Auth's `verifyApiKey` on Void's per-request auth instance and resolves the owner through Better Auth's user adapter. Keys grant their owner's account access and role. The default per-key limit is 1,000 requests per minute; exceeding it returns 429. Invalid, expired or revoked keys return 401, even alongside a valid browser session. Existing cookie and session bearer authentication continue to work.
+
+Key management uses Better Auth's native endpoints with a normal signed-in session:
+
+- `GET /api/auth/api-key/list` returns `{ apiKeys, total, limit, offset }`; key hashes and secrets are excluded.
+- `POST /api/auth/api-key/create` accepts `{ name, expiresIn?: number | null }` and returns the new key object with its one-time `key`. Expiry is in **seconds**, not milliseconds; omitted/null means no expiry.
+- `POST /api/auth/api-key/delete` accepts `{ keyId }` and revokes an owned key. Foreign/missing IDs return 404.
+
+API keys cannot access `/api/auth/*`, including key management. Session mocking is left disabled, so a leaked key cannot create replacement credentials or change the account password. Better Auth serializes key timestamps as ISO date strings.
+
+Apply the new D1 migration before using these routes. This replaces the unreleased custom-key migration in this draft PR; there are no deployed custom keys to migrate. No new environment secret is required.

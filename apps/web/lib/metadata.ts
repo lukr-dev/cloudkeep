@@ -1,7 +1,7 @@
 import { decodeHTML, decodeHTMLAttribute } from "entities/decode";
 import { normalizeUrl, resolveHttpUrl } from "./url.ts";
 
-export const MAX_BODY_BYTES = 512 * 1024;
+export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const MAX_CONTENT_CHARS = 20_000;
 export type Metadata = {
   title: string | null;
@@ -11,6 +11,7 @@ export type Metadata = {
   siteName: string | null;
   contentText: string;
   contentTruncated: boolean;
+  pageTruncated: boolean;
 };
 function attribute(element: { getAttribute(name: string): string | null }, name: string) {
   const value = element.getAttribute(name);
@@ -156,6 +157,7 @@ export async function extractMetadata(response: Response, pageUrl: string): Prom
       .join("\n\n")
       .slice(0, MAX_CONTENT_CHARS),
     contentTruncated: truncated,
+    pageTruncated: false,
   };
 }
 export async function fetchMetadata(
@@ -187,24 +189,29 @@ export async function fetchMetadata(
         await response.body?.cancel();
         throw new Error("Page is not HTML");
       }
-      if (Number(response.headers.get("content-length")) > MAX_BODY_BYTES) {
-        await response.body?.cancel();
-        throw new Error("Page exceeds 512 KiB");
-      }
       let bytes = 0;
+      let pageTruncated = false;
       const limited = response.body?.pipeThrough(
         new TransformStream<Uint8Array, Uint8Array>({
           transform(chunk, stream) {
-            bytes += chunk.byteLength;
-            if (bytes > MAX_BODY_BYTES) {
-              controller.abort();
-              throw new Error("Page exceeds 512 KiB");
+            const remaining = MAX_BODY_BYTES - bytes;
+            if (chunk.byteLength > remaining) {
+              pageTruncated = true;
+              stream.enqueue(chunk.subarray(0, remaining));
+              // Finish the partial document and cancel the upstream download.
+              stream.terminate();
+              return;
             }
+            bytes += chunk.byteLength;
             stream.enqueue(chunk);
           },
         }),
       );
-      return await extractMetadata(new Response(limited, { headers: response.headers }), url);
+      const metadata = await extractMetadata(
+        new Response(limited, { headers: response.headers }),
+        url,
+      );
+      return { ...metadata, pageTruncated };
     }
     throw new Error("Too many page redirects");
   } finally {

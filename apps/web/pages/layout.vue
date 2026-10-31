@@ -7,6 +7,7 @@ import { listsStore } from "../composables/lists.ts";
 import { toast } from "../composables/toast.ts";
 import Icon from "../components/Icon.vue";
 import { trackNavigation } from "../lib/navigation.ts";
+import { version } from "../../../package.json";
 import "../style.css";
 const repository = "https://github.com/lukr-dev/cloudkeep";
 const router = useRouter();
@@ -143,6 +144,7 @@ async function signOut() {
         >
       </p>
       <nav class="footer-links" aria-label="Project">
+        <span aria-label="App version">v{{ version }}</span>
         <a :href="repository" target="_blank" rel="noopener noreferrer"
           ><Icon name="github" :size="14" />GitHub</a
         >
