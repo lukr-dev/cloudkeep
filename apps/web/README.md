@@ -329,3 +329,17 @@ Provider contracts verified against the installed Workers types and official doc
 [OpenAI speech](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create),
 and [OpenRouter TTS](https://openrouter.ai/docs/guides/overview/multimodal/tts)
 (binary output; its default format is PCM, so CloudKeep requests MP3 explicitly).
+
+## Personal API keys
+
+In **Settings → API keys**, create a named key with a 30-day, 90-day, one-year, or no expiry. Copy the key immediately: it is shown only once. The list shows its name, prefix and expiry, with a Revoke button that takes effect on the next request. Signing out does not revoke API keys.
+
+Send `Authorization: Bearer ck_…` to the JSON API. Each key grants the same account access and role as its owner. Only SHA-256 hashes of random 256-bit keys are stored; the full key cannot be recovered. Expired, revoked and malformed keys return 401, even if a browser session cookie is also present. Existing browser cookies and session bearer tokens continue to work.
+
+Key management requires a normal signed-in session. API keys cannot access `/api/api-keys` or `/api/auth/*`, so a key cannot mint replacement credentials or change the account password.
+
+- `GET /api/api-keys` returns `{ items: { id, name, prefix, createdAt, expiresAt }[] }` for the signed-in user.
+- `POST /api/api-keys` accepts `{ name, expiresAt?: number | null }` and returns 201 `{ item, key }`. Expiry uses Unix milliseconds and must be in the future; omitted/null means no expiry.
+- `DELETE /api/api-keys/:id` permanently revokes an owned key. Foreign/missing IDs return 404.
+
+Apply the new D1 migration before using these routes. No new environment secret or dependency is required.
