@@ -400,20 +400,21 @@ onUnmounted(() => {
           >{{ total }} {{ filters.archived ? "archived " : ""
           }}{{ total === 1 ? "bookmark" : "bookmarks" }}</span
         >
-        <button
-          v-if="failedTotal"
-          :disabled="busy"
-          title="Retry all failed bookmarks across all lists, including archived bookmarks"
-          @click="retryFailed"
-        >
-          {{ retryingFailed ? "Retrying…" : `Retry ${failedTotal} failed` }}
-        </button>
         <Link v-if="activeList" :href="filterUrl({ ...filters, listId: '' })" class="chip"
           >{{ activeList.name }}<Icon name="x" :size="12"
         /></Link>
         <Link v-if="filters.tag" :href="filterUrl({ ...filters, tag: '' })" class="chip"
           >{{ filters.tag }}<Icon name="x" :size="12"
         /></Link>
+        <button
+          v-if="failedTotal"
+          class="retry-failed small tabular"
+          :disabled="busy"
+          title="Retry all failed bookmarks across all lists, including archived bookmarks"
+          @click="retryFailed"
+        >
+          {{ retryingFailed ? "Retrying…" : `Retry ${failedTotal} failed` }}
+        </button>
       </div>
       <div v-if="loadError" class="alert" role="alert">
         <span>{{ loadError }}</span
@@ -613,6 +614,26 @@ onUnmounted(() => {
 .meta .chip {
   background: var(--accent-soft);
   color: var(--accent);
+}
+.retry-failed {
+  margin-left: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--danger);
+  font-weight: 400;
+  text-underline-offset: 3px;
+}
+.retry-failed:hover {
+  background: transparent;
+}
+.retry-failed:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.retry-failed:active:not(:disabled) {
+  transform: none;
 }
 .list {
   display: grid;
