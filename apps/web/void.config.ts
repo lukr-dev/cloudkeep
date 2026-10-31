@@ -6,7 +6,7 @@ export default defineConfig({
   cloudflare: {
     name: "cloudkeep",
     // Inference alone does not remove an R2 binding saved in void.lock.json.
-    ...(process.env.CLOUDKEEP_FILES === "true" ? {} : { r2_buckets: [] }),
+    ...(process.env.CLOUDKEEP_FILES !== "false" ? {} : { r2_buckets: [] }),
   },
   // Without a viewport tag, phones lay the page out at a ~980px virtual width
   // and the responsive breakpoints in style.css never apply.
@@ -16,5 +16,5 @@ export default defineConfig({
     meta: [{ name: "viewport", content: "width=device-width, initial-scale=1" }],
   },
   // lib/ is not scanned by binding inference.
-  inference: { bindings: { ai: true, storage: process.env.CLOUDKEEP_FILES === "true" } },
+  inference: { bindings: { ai: true, storage: process.env.CLOUDKEEP_FILES !== "false" } },
 });
