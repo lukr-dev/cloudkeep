@@ -1,3 +1,4 @@
+import { ProviderError } from "./provider-error.ts";
 import { processingList } from "./processing-list.ts";
 import { listProfile } from "./list-settings.ts";
 import { prepareAudio, processAudio } from "./audio.ts";
@@ -135,11 +136,12 @@ export async function processBookmark(job: ProcessMessage) {
   } catch (error) {
     // Only controlled messages go to the API; SDK errors may include secrets.
     const message =
-      error instanceof Error &&
-      (error.message === FILES_DISABLED_MESSAGE ||
-        /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
-          error.message,
-        ))
+      error instanceof ProviderError ||
+      (error instanceof Error &&
+        (error.message === FILES_DISABLED_MESSAGE ||
+          /^(Page |Too many page|AI provider returned|AI returned|Set an API key|Choose an AI)/.test(
+            error.message,
+          )))
         ? error.message
         : "Couldn’t process this bookmark. Check your AI settings, then retry.";
     await db

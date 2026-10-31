@@ -8,6 +8,7 @@ import {
   api,
   message,
   uploadFile,
+  retryFailedBookmarks,
   type Bookmark,
   type BookmarkItem,
   type Page,
@@ -42,6 +43,8 @@ const filters = reactive(readFilters(router.query));
 const bookmarks = ref<BookmarkItem[]>([]);
 const { lists } = listsStore;
 const total = ref(0);
+const failedTotal = ref(0);
+const retryingFailed = ref(false);
 const loading = ref(true);
 const loadError = ref("");
 const url = ref("");
@@ -55,7 +58,7 @@ const hasFilters = computed(() => !!(filters.q || filters.listId || filters.tag 
 const activeList = computed(() => lists.value.find((list) => list.id === filters.listId));
 async function checkAssets() {
   if (features.value.files) return;
-  const assets = await api<Page<BookmarkItem> & { total: number }>(
+  const assets = await api<Page<BookmarkItem> & { total: number; failedTotal: number }>(
     "/api/bookmarks?type=asset&limit=1",
   );
   if (!disposed) hasAssets.value = assets.total > 0;
@@ -78,9 +81,12 @@ async function load(more = false, background = false) {
         (_, index) => {
           const params = new URLSearchParams(query);
           params.set("offset", String(background ? index * 20 : offset));
-          return api<Page<BookmarkItem> & { total: number }>(`/api/bookmarks?${params}`, {
-            signal: controller!.signal,
-          });
+          return api<Page<BookmarkItem> & { total: number; failedTotal: number }>(
+            `/api/bookmarks?${params}`,
+            {
+              signal: controller!.signal,
+            },
+          );
         },
       ),
     );
@@ -103,6 +109,7 @@ async function load(more = false, background = false) {
         ]
       : items;
     total.value = pages[0]!.total;
+    failedTotal.value = pages[0]!.failedTotal;
     if (settled) await listsStore.refresh().catch(() => {});
   } catch (cause) {
     if (
@@ -224,6 +231,20 @@ function drop(event: DragEvent) {
   if (!features.value.files || !event.dataTransfer?.types.includes("Files")) return;
   event.preventDefault();
   void addFiles(Array.from(event.dataTransfer.files));
+}
+function retryFailed() {
+  return run(async () => {
+    retryingFailed.value = true;
+    try {
+      const { queued, failed } = await retryFailedBookmarks();
+      notice.value = `Queued ${queued} bookmarks for retry`;
+      if (failed) throw new Error(`Could not queue ${failed} bookmarks. Try again.`);
+    } finally {
+      retryingFailed.value = false;
+      schedule(true);
+      await load(false, true);
+    }
+  });
 }
 function retry(id: string) {
   return run(async () => {
@@ -379,6 +400,14 @@ onUnmounted(() => {
           >{{ total }} {{ filters.archived ? "archived " : ""
           }}{{ total === 1 ? "bookmark" : "bookmarks" }}</span
         >
+        <button
+          v-if="failedTotal"
+          :disabled="busy"
+          title="Retry all failed bookmarks across all lists, including archived bookmarks"
+          @click="retryFailed"
+        >
+          {{ retryingFailed ? "Retrying…" : `Retry ${failedTotal} failed` }}
+        </button>
         <Link v-if="activeList" :href="filterUrl({ ...filters, listId: '' })" class="chip"
           >{{ activeList.name }}<Icon name="x" :size="12"
         /></Link>

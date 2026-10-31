@@ -61,6 +61,10 @@ export const GET = defineHandler.withValidator({
     .limit(query.limit)
     .offset(query.offset);
   const [total] = await db.select({ count: count() }).from(bookmarks).where(where);
+  const [failed] = await db
+    .select({ count: count() })
+    .from(bookmarks)
+    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.status, "failed")));
   const ids = rows.map((b) => b.id);
   const tagLinks = ids.length
     ? await db
@@ -97,6 +101,7 @@ export const GET = defineHandler.withValidator({
       };
     }),
     total: total!.count,
+    failedTotal: failed!.count,
     limit: query.limit,
     offset: query.offset,
   };

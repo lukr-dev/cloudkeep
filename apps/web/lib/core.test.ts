@@ -104,6 +104,18 @@ describe("external providers", () => {
       "AI provider returned HTTP 401",
     );
   });
+  it("reports only the upstream error code", async () => {
+    const body = JSON.stringify({
+      error: { message: "Incorrect API key provided: sk-abc", code: "invalid_api_key" },
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { status: 401 }));
+    const message = await externalCompletion("openai", "m", "k", "p", 8, null, fetcher).then(
+      () => "",
+      (e: Error) => e.message,
+    );
+    expect(message).toMatch(/^AI provider returned HTTP 401 \[invalid_api_key\]/);
+    expect(message).not.toContain("sk-abc");
+  });
 });
 
 it("uses provider effort defaults only with an unset model", () => {
@@ -195,4 +207,15 @@ describe("bookmark archive validation", () => {
     for (const value of ["1", "true"]) expect(archivedQuery.parse(value)).toBe(true);
     for (const value of ["yes", "", 1]) expect(archivedQuery.safeParse(value).success).toBe(false);
   });
+});
+
+it("explains provider authentication failures without reflecting upstream secrets", async () => {
+  for (const provider of ["openai", "openrouter"] as const) {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ error: { message: "sk-private" } }, { status: 401 }));
+    await expect(
+      externalCompletion(provider, "model", "sk-key", "prompt", 8, null, fetcher),
+    ).rejects.toThrow(`${provider} rejected the saved API key`);
+  }
 });
