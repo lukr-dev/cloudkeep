@@ -5,6 +5,9 @@ export default defineConfig({
   worker: { compatibility_date: "2026-10-17", compatibility_flags: ["nodejs_compat"] },
   cloudflare: {
     name: "cloudkeep",
+    routes: [{ pattern: "cloudkeep.toastnet.work", custom_domain: true }],
+    workers_dev: false,
+    preview_urls: false,
     // Inference alone does not remove an R2 binding saved in void.lock.json.
     ...(process.env.CLOUDKEEP_FILES !== "false" ? {} : { r2_buckets: [] }),
   },
