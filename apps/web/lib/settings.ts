@@ -10,7 +10,7 @@ import {
   workersAiInput,
   parseWorkersAiResponse,
 } from "./providers.ts";
-import { decrypt } from "./crypto.ts";
+import { providerKey } from "./provider-key.ts";
 import { resolvePrompts } from "./list-settings.ts";
 import { DEFAULT_TTS } from "./tts.ts";
 import { PROMPT_VARIABLES } from "./prompts.ts";
@@ -56,6 +56,6 @@ export async function complete(
   }
   const encrypted = provider === "openai" ? profile.openaiKey : profile.openrouterKey;
   if (!encrypted) throw new Error("Set an API key for the selected provider");
-  const key = await decrypt(encrypted, env.ENCRYPTION_KEY, `${profile.userId}:${provider}`);
+  const key = await providerKey(encrypted, env.ENCRYPTION_KEY, `${profile.userId}:${provider}`);
   return externalCompletion(provider, model, key, prompt, maxTokens, effort);
 }

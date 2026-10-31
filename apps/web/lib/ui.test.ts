@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { allItems, api, ApiError } from "./api.ts";
+import { allItems, api, ApiError, retryFailedBookmarks } from "./api.ts";
 import { filterQuery, filterUrl, readFilters } from "./filters.ts";
 import { tagFontSize } from "./tag-cloud.ts";
 import { canGoBack, trackNavigation } from "./navigation.ts";
@@ -168,4 +168,25 @@ it("round trips bookmark type filters and ignores unsupported types", () => {
     expect(filterUrl(filters)).toBe(`/?type=${type}`);
   }
   expect(readFilters(new URLSearchParams("type=unknown")).type).toBe("");
+});
+
+it("walks every failed-bookmark retry batch and reports partial queue failures", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ queued: 49, failed: 1, nextCursor: "cursor" }))
+    .mockResolvedValueOnce(Response.json({ queued: 3, failed: 0, nextCursor: null }));
+  vi.stubGlobal("fetch", fetcher);
+  expect(await retryFailedBookmarks()).toEqual({ queued: 52, failed: 1 });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[0]?.[0]).toBe("/api/bookmarks/retry-failed");
+  expect(JSON.parse(fetcher.mock.calls[0]?.[1].body)).toEqual({});
+  expect(JSON.parse(fetcher.mock.calls[1]?.[1].body)).toEqual({ after: "cursor" });
+});
+it("stops bulk retries on a request error instead of repeating failed batches", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(Response.json({ error: "Unavailable" }, { status: 503 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(retryFailedBookmarks()).rejects.toThrow("Unavailable");
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

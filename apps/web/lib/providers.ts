@@ -1,3 +1,4 @@
+import { providerResponseError } from "./provider-error.ts";
 import { z } from "zod";
 
 export const providerSchema = z.enum(["workers-ai", "openrouter", "openai"]);
@@ -92,10 +93,7 @@ export async function externalCompletion(
 ) {
   const { url, init } = providerRequest(provider, model, key, prompt, maxTokens, effort);
   const response = await fetcher(url, { ...init, signal: AbortSignal.timeout(12_000) });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`AI provider returned HTTP ${response.status}`);
-  }
+  if (!response.ok) throw await providerResponseError(provider, response);
   // Do not return provider error bodies: they can contain credentials or request text.
   const data = z
     .object({

@@ -1,3 +1,4 @@
+import { ProviderError } from "../../../../lib/provider-error.ts";
 import { defineHandler } from "void";
 import { profileFor, fail } from "../../../../lib/http.ts";
 import { complete } from "../../../../lib/settings.ts";
@@ -10,7 +11,8 @@ export const POST = defineHandler.withValidator({ body: z.object({}).strict() })
     // Reasoning models spend output tokens thinking first; 8 tokens can yield empty content.
     await complete(profile, "Reply with OK.", 256);
     return { ok: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof ProviderError) return fail(502, error.message);
     return fail(502, "AI test failed; check the selected provider, model, key, and quota");
   }
 });

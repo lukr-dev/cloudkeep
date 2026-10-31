@@ -1,6 +1,7 @@
+import { providerResponseError } from "./provider-error.ts";
 import { ai } from "void/ai";
 import { env } from "void/env";
-import { decrypt } from "./crypto.ts";
+import { providerKey } from "./provider-key.ts";
 import {
   chunkSpeech,
   DEFAULT_TTS,
@@ -31,7 +32,7 @@ export async function synthesize(
   if (provider !== "workers-ai") {
     const encrypted = provider === "openai" ? profile.openaiKey : profile.openrouterKey;
     if (!encrypted) throw new Error("Set an API key for the selected TTS provider");
-    key = await decrypt(encrypted, env.ENCRYPTION_KEY, `${profile.userId}:${provider}`);
+    key = await providerKey(encrypted, env.ENCRYPTION_KEY, `${profile.userId}:${provider}`);
   }
   const buffers: ArrayBuffer[] = [];
   for (const input of chunkSpeech(text, TTS_INPUT_LIMITS[provider])) {
@@ -52,10 +53,7 @@ export async function synthesize(
     } else {
       const { url, init } = speechRequest(provider, model, voice, key, input);
       const response = await fetch(url, { ...init, signal: AbortSignal.timeout(60_000) });
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new Error(`TTS provider returned HTTP ${response.status}`);
-      }
+      if (!response.ok) throw await providerResponseError(provider, response, "TTS");
       buffers.push(await response.arrayBuffer());
     }
   }
