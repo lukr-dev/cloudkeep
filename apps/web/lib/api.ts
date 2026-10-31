@@ -196,3 +196,22 @@ export type ListSettings = List & {
   ttsVoice: string | null;
 };
 export type ListConfiguration = { list: ListSettings; prompts: Prompts };
+
+export async function retryFailedBookmarks() {
+  let queued = 0;
+  let failed = 0;
+  let after: string | null = null;
+  do {
+    const result: { queued: number; failed: number; nextCursor: string | null } = await api(
+      "/api/bookmarks/retry-failed",
+      {
+        method: "POST",
+        body: after ? { after } : {},
+      },
+    );
+    queued += result.queued;
+    failed += result.failed;
+    after = result.nextCursor;
+  } while (after);
+  return { queued, failed };
+}

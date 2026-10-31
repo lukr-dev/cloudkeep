@@ -1,3 +1,4 @@
+import { ProviderError } from "./provider-error.ts";
 import { db, and, eq, sql } from "void/db";
 import { storage } from "void/storage";
 import { queues } from "void/queues";
@@ -150,10 +151,11 @@ export async function processAudio(job: AudioMessage) {
   } catch (error) {
     if (key) await storage.delete(key).catch(() => {});
     const message =
-      error instanceof Error &&
-      /^(Set an API key|Choose an AI|AI provider returned HTTP \d+$|TTS provider returned HTTP \d+$|AI returned an empty summary$|TTS returned (invalid|empty) audio$)/.test(
-        error.message,
-      )
+      error instanceof ProviderError ||
+      (error instanceof Error &&
+        /^(Set an API key|Choose an AI|AI provider returned HTTP \d+$|TTS provider returned HTTP \d+$|AI returned an empty summary$|TTS returned (invalid|empty) audio$)/.test(
+          error.message,
+        ))
         ? error.message
         : "Could not generate audio. Check your AI and TTS settings, then retry.";
     await db

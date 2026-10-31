@@ -4,6 +4,9 @@ import { Miniflare } from "miniflare";
 import { Hono } from "hono";
 import type { CloudEnv } from "void";
 import { createDb } from "void/db";
+import { POST as retryFailed } from "../routes/api/bookmarks/retry-failed.ts";
+import { POST as retryOne } from "../routes/api/bookmarks/[id]/reprocess.ts";
+import { reprocess } from "./reprocess.ts";
 import { GET, POST } from "../routes/api/bookmarks/index.ts";
 import { GET as lookup } from "../routes/api/bookmarks/lookup.ts";
 import { GET as detail, PATCH } from "../routes/api/bookmarks/[id]/index.ts";
@@ -11,6 +14,9 @@ import { GET as getLists } from "../routes/api/lists/index.ts";
 import { GET as getTags } from "../routes/api/tags/index.ts";
 import { GET as getCloud } from "../routes/api/tags/cloud.ts";
 import type { Bookmark, BookmarkItem, BookmarkLookup, BookmarkCreate, List, Tag } from "./api.ts";
+
+const queue = vi.hoisted(() => ({ send: vi.fn() }));
+vi.mock("void/queues", () => ({ queues: { bookmarks: { send: queue.send } } }));
 
 let database: ReturnType<typeof createDb>;
 vi.mock("void/db", async (original) => ({
@@ -56,6 +62,8 @@ app.use("*", async (c, next) => {
   });
   await next();
 });
+app.post("/api/bookmarks/retry-failed", async (c) => (await retryFailed(c)) as Response);
+app.post("/api/bookmarks/:id/reprocess", async (c) => (await retryOne(c)) as Response);
 app.get("/api/bookmarks", async (c) => (await GET(c)) as Response);
 app.post("/api/bookmarks", async (c) => (await POST(c)) as Response);
 app.get("/api/bookmarks/lookup", async (c) => (await lookup(c)) as Response);
@@ -236,4 +244,111 @@ it("returns full memberships on creation and merges them when re-saving", async 
   expect(merged.bookmark.listIds.sort()).toEqual([listId, extraListId].sort());
   expect((await save({ url }, 200)).bookmark.listIds.sort()).toEqual([listId, extraListId].sort());
   expect((await save({ url: "https://example.com/no-lists" }, 201)).bookmark.listIds).toEqual([]);
+});
+
+it("retries all failures across pages and archive, isolates users, and leaves other statuses alone", async () => {
+  const binding = await runtime.getD1Database("DB");
+  const ids = Array.from({ length: 53 }, () => crypto.randomUUID()).sort();
+  const privateId = crypto.randomUUID();
+  const pendingId = crypto.randomUUID();
+  for (const [index, bookmarkId] of [...ids, privateId, pendingId].entries()) {
+    await binding
+      .prepare(
+        "INSERT INTO bookmarks (id,user_id,type,status,error,run_id,archived_at,created_at,updated_at) VALUES (?,?,'text',?,'old error','old-run',?,1,1)",
+      )
+      .bind(
+        bookmarkId,
+        bookmarkId === privateId ? otherUserId : userId,
+        bookmarkId === pendingId ? "processing" : "failed",
+        index % 2 ? 1 : null,
+      )
+      .run();
+  }
+  queue.send.mockClear();
+  const before = await request<{ failedTotal: number }>("/api/bookmarks?limit=1&q=absent");
+  expect(before.failedTotal).toBe(53);
+  let after: string | null = null;
+  let queued = 0;
+  do {
+    const result: { queued: number; failed: number; nextCursor: string | null } = await request(
+      "/api/bookmarks/retry-failed",
+      "POST",
+      after ? { after } : {},
+    );
+    queued += result.queued;
+    expect(result.failed).toBe(0);
+    after = result.nextCursor;
+  } while (after);
+  expect(queued).toBe(53);
+  expect(queue.send).toHaveBeenCalledTimes(53);
+  for (const [job] of queue.send.mock.calls) {
+    expect(job.userId).toBe(userId);
+    expect(ids).toContain(job.bookmarkId);
+    expect(job.runId).not.toBe("old-run");
+  }
+  expect(
+    await binding
+      .prepare("SELECT status,run_id,error FROM bookmarks WHERE id=?")
+      .bind(ids[0]!)
+      .first(),
+  ).toEqual({ status: "pending", run_id: expect.any(String), error: null });
+  expect(await reprocess(userId, ids[0]!, true)).toBeNull();
+  expect(await reprocess(userId, privateId, true)).toBeNull();
+  expect(queue.send).toHaveBeenCalledTimes(53);
+  expect(await request("/api/bookmarks/retry-failed", "POST", {})).toEqual({
+    queued: 0,
+    failed: 0,
+    nextCursor: null,
+  });
+  expect((await request<{ failedTotal: number }>("/api/bookmarks")).failedTotal).toBe(0);
+  expect(
+    await binding.prepare("SELECT status FROM bookmarks WHERE id=?").bind(privateId).first(),
+  ).toEqual({ status: "failed" });
+  expect(
+    await binding.prepare("SELECT status FROM bookmarks WHERE id=?").bind(pendingId).first(),
+  ).toEqual({ status: "processing" });
+});
+it("keeps queue failures retryable and shares the single-bookmark path", async () => {
+  const binding = await runtime.getD1Database("DB");
+  const bookmarkId = crypto.randomUUID();
+  await binding
+    .prepare(
+      "INSERT INTO bookmarks (id,user_id,type,status,run_id,created_at,updated_at) VALUES (?,?,'text','failed','old',1,1)",
+    )
+    .bind(bookmarkId, userId)
+    .run();
+  queue.send.mockRejectedValueOnce(new Error("private queue details"));
+  expect(await request("/api/bookmarks/retry-failed", "POST", {})).toEqual({
+    queued: 0,
+    failed: 1,
+    nextCursor: null,
+  });
+  expect(
+    await binding.prepare("SELECT status,error FROM bookmarks WHERE id=?").bind(bookmarkId).first(),
+  ).toEqual({ status: "failed", error: "Could not enqueue processing; reprocess to retry" });
+  const response = await app.request(`/api/bookmarks/${bookmarkId}/reprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  expect(response.status).toBe(202);
+  expect(await response.json()).toMatchObject({
+    bookmark: { id: bookmarkId, status: "pending", error: null },
+  });
+});
+it("requires authentication and validates bulk retry input", async () => {
+  const response = await app.request("/api/bookmarks/retry-failed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-anonymous": "1" },
+    body: "{}",
+  });
+  expect(response.status).toBe(401);
+  for (const body of [{ userId: otherUserId }, { after: "bad-id" }]) {
+    const response = await app.request("/api/bookmarks/retry-failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(400);
+  }
 });
