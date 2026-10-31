@@ -80,6 +80,8 @@ Set the repository secret `CLOUDFLARE_API_TOKEN` with account permissions **Work
 
 If the Worker has no version preview URL, set the repository variable `CLOUDFLARE_WORKERS_SUBDOMAIN` to the account's Workers subdomain (for example `my-team`); fresh CI runners cannot use a locally cached subdomain for readiness checks.
 
+Production routing and visibility are declared in `void.config.ts`: the `cloudkeep.toastnet.work` custom domain, `workers_dev: false`, and `preview_urls: false`. Keep these values aligned with Cloudflare's **Settings > Domains & Routes**. Void can stop before uploading with a dashboard-managed routes/visibility error when these settings are implicit; the domain saved in `void.lock.json` alone is not sufficient.
+
 Each deploy applies pending D1 migrations. Rollback restores code and triggers but does **not** undo database migrations.
 
 ### AI providers
