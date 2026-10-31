@@ -76,7 +76,7 @@ Void infers D1, auth and queues from the code; AI is explicitly enabled and R2 i
 
 `.github/workflows/deploy.yml` deploys production on pushes to `main` and via **Run workflow** (`workflow_dispatch`, select `main`). Deploys run one at a time, without an approval gate, after `vp check` and `vp test` pass.
 
-Set the repository secret `CLOUDFLARE_API_TOKEN` with account permissions **Workers Scripts: Edit**, **D1: Edit**, **Queues: Edit**, **Workers AI: Read** and **Account Settings: Read**, plus the custom-domain zone permissions listed above. Optionally set `CLOUDFLARE_ACCOUNT_ID` as a repository secret or variable; the account ID is already pinned in `void.lock.json`. Set the repository variable `CLOUDKEEP_FILES` to `true` only to enable R2; unset keeps production file storage off. Enabling it also requires **Workers R2 Storage: Edit** and R2 enabled on the account.
+Set the repository secret `CLOUDFLARE_API_TOKEN` with account permissions **Workers Scripts: Edit**, **D1: Edit**, **Queues: Edit**, **Workers AI: Read** and **Account Settings: Read**, plus the custom-domain zone permissions listed above. Optionally set `CLOUDFLARE_ACCOUNT_ID` as a repository secret or variable; the account ID is already pinned in `void.lock.json`. File storage is enabled by default and requires **Workers R2 Storage: Edit** and R2 enabled on the account. Set the repository variable `CLOUDKEEP_FILES` to `false` to disable it.
 
 If the Worker has no version preview URL, set the repository variable `CLOUDFLARE_WORKERS_SUBDOMAIN` to the account's Workers subdomain (for example `my-team`); fresh CI runners cannot use a locally cached subdomain for readiness checks.
 
@@ -262,24 +262,24 @@ R2 and D1 do not share a transaction. Cleanup is best-effort; a Worker terminati
 
 ## File uploads (optional, needs R2)
 
-File uploads are **off by default**. Links, Markdown notes, lists, tags and the AI settings work without R2. Notes live entirely in D1. There is no runtime storage toggle.
+File uploads are **on by default**. Enable R2 on the Cloudflare account (this requires enabling billing) and give the deployment API token **Workers R2 Storage: Edit**. Links, Markdown notes, lists, tags and the AI settings work without R2. Notes live entirely in D1. There is no runtime storage toggle.
 
-To enable uploads, enable R2 on the Cloudflare account (this requires enabling billing), give the deployment API token **Workers R2 Storage: Edit**, and set the process environment when running Void. From `apps/web`:
+To disable uploads, set the process environment when running Void. From `apps/web`:
 
 ```sh
-CLOUDKEEP_FILES=true vp exec void deploy --platform cloudflare
+CLOUDKEEP_FILES=false vp exec void deploy --platform cloudflare
 ```
 
 For local development/builds, run from the monorepo root:
 
 ```sh
-CLOUDKEEP_FILES=true vp run dev
-CLOUDKEEP_FILES=true vp run web#build
+CLOUDKEEP_FILES=false vp run dev
+CLOUDKEEP_FILES=false vp run web#build
 ```
 
-`void.config.ts` evaluates before Void loads `apps/web/.env`; putting `CLOUDKEEP_FILES=true` only in that file does **not** enable storage. Use the shell prefix or export it in the build/deploy environment. The build task explicitly passes and fingerprints this variable for Vite Task caching; the dev tasks are uncached so they inherit it. Without this task configuration a cached runner can omit the variable and produce an off build. Only the exact string `true` opts in.
+`void.config.ts` evaluates before Void loads `apps/web/.env`; putting `CLOUDKEEP_FILES=false` only in that file does **not** disable storage. Use the shell prefix or export it in the build/deploy environment. The build task explicitly passes and fingerprints this variable for Vite Task caching; the dev tasks are uncached so they inherit it. Only the exact string `false` opts out; unset or empty values keep storage enabled, including an unset CI repository variable.
 
-Verified with Void 1.1.11: `dist/ssr/wrangler.json` has `r2_buckets: []` with the flag unset and `[{ "binding": "STORAGE", "bucket_name": "default" }]` with it set. Explicit `inference.bindings.storage: false` overrides imports in the routes. Off mode also authors `cloudflare.r2_buckets: []`, because Void otherwise retains provisioned R2 bindings from `void.lock.json`; this was checked in both preview and native Cloudflare builds with a simulated saved bucket. Native Cloudflare deployment uses the same inferred `needsR2` flag to decide whether to provision a bucket; no real provisioning/deploy was performed for this change. Review the generated plan before deploying, and retain the bucket name before disabling an existing installation.
+With Void 1.1.11, `dist/ssr/wrangler.json` includes the `STORAGE` R2 binding by default and has `r2_buckets: []` with `CLOUDKEEP_FILES=false`. Explicit `inference.bindings.storage: false` overrides imports in the routes. Off mode also authors `cloudflare.r2_buckets: []`, because Void otherwise retains provisioned R2 bindings from `void.lock.json`. Native Cloudflare deployment uses the same inferred `needsR2` flag to decide whether to provision a bucket. Review the generated plan before deploying, and retain the bucket name before disabling an existing installation.
 
 `GET /api/me` returns `features: { files: boolean }` based on the runtime binding. When off, the UI hides File and drag-and-drop, hides the Files filter unless the user has existing assets, and shows “File storage is disabled” for those assets. Settings shows admins the read-only status and enablement instructions. Authenticated upload requests and owner file reads return `503 { error: "File uploads are disabled on this server" }`. Reprocessing an existing asset marks it failed with the same controlled message. Deleting it removes its D1 row and skips R2.
 
@@ -307,7 +307,7 @@ re-saving an existing URL leave that choice alone. Reprocess uses the chosen lis
 settings. Deleting that list restores user defaults. Prompts inherit independently from the
 user's prompt, then the built-in default. List provider overrides reuse the user's encrypted keys.
 
-Audio shares the optional R2 switch above (`CLOUDKEEP_FILES=true`). Enable spoken summaries
+Audio shares the R2 switch above (enabled by default; `CLOUDKEEP_FILES=false` disables it). Enable spoken summaries
 in a list's Settings panel; choose default TTS settings in Settings, or override them per list.
 Short audio also generates a summary when automatic summaries are off. Full summary runs on
 demand through the bookmark queue and uses the detailed-summary prompt. Audio errors are
