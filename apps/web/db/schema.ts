@@ -58,6 +58,7 @@ export const bookmarks = sqliteTable(
     contentText: text("content_text"),
     summary: text("summary"),
     contentTruncated: integer("content_truncated", { mode: "boolean" }).notNull().default(false),
+    pageTruncated: integer("page_truncated", { mode: "boolean" }).notNull().default(false),
     processingListId: text("processing_list_id").references(() => lists.id, {
       onDelete: "set null",
     }),

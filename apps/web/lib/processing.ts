@@ -55,6 +55,7 @@ export async function processBookmark(job: ProcessMessage) {
             title: bookmark.title ?? bookmark.assetName,
             description: bookmark.description,
             contentText: content.slice(0, MAX_CONTENT_CHARS),
+            pageTruncated: false,
           };
 
     await db

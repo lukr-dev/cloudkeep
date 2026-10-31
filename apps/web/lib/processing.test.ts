@@ -86,6 +86,7 @@ it("processes note Markdown without fetching a page and uses it for the user's A
   expect(mocks.fetchMetadata).not.toHaveBeenCalled();
   expect(mocks.toMarkdown).not.toHaveBeenCalled();
   expect(mocks.complete).toHaveBeenCalledWith(mocks.profile[0], "# Full note");
+  expect(mocks.patches[1]?.pageTruncated).toBe(false);
   expect(mocks.patches).toContainEqual({ summary: "Summary" });
   expect(mocks.patches.at(-1)).toMatchObject({ status: "done", error: null });
 });
@@ -105,6 +106,7 @@ it("extracts asset Markdown and caps persisted content", async () => {
   expect(mocks.fetchMetadata).not.toHaveBeenCalled();
   expect(mocks.toMarkdown).toHaveBeenCalledWith({ name: "document.pdf", blob: expect.any(Blob) });
   expect(mocks.patches[1]?.contentText).toHaveLength(20_000);
+  expect(mocks.patches[1]?.pageTruncated).toBe(false);
   expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
 });
 it("continues with filename/title when extraction is unavailable", async () => {
@@ -200,5 +202,19 @@ it("silently skips list audio when storage is disabled", async () => {
   await processBookmark(job);
   expect(mocks.prepareAudio).not.toHaveBeenCalled();
   expect(mocks.processAudio).not.toHaveBeenCalled();
+  expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
+});
+
+it("persists page truncation from link metadata", async () => {
+  mocks.claim = [{ type: "link", url: "https://example.com" }];
+  mocks.fetchMetadata.mockResolvedValue({
+    title: "Large page",
+    description: null,
+    contentText: "Beginning",
+    contentTruncated: false,
+    pageTruncated: true,
+  });
+  await processBookmark(job);
+  expect(mocks.patches[1]).toMatchObject({ pageTruncated: true, contentTruncated: false });
   expect(mocks.patches.at(-1)).toMatchObject({ status: "done" });
 });
