@@ -1,29 +1,30 @@
 import { defineMiddleware } from "void";
-import { db, and, eq, or, gt, isNull } from "void/db";
-import { apiKeys } from "../db/schema.ts";
-import { userTable } from "../.void/better-auth-schema.ts";
-import { API_KEY_PREFIX, apiKeyHash } from "../lib/api-keys.ts";
+import type { betterAuth } from "better-auth";
+import type configureAuth from "../auth.ts";
 import { fail } from "../lib/http.ts";
+
+type Auth = ReturnType<typeof betterAuth<ReturnType<typeof configureAuth>>>;
 
 export default defineMiddleware(async (c, next) => {
   if (!c.req.path.startsWith("/api/")) return next();
   const authorization = c.req.header("authorization");
-  if (!authorization?.startsWith(`Bearer ${API_KEY_PREFIX}`)) return next();
-  const hash = await apiKeyHash(authorization.slice(7));
-  if (!hash) return fail(401, "Invalid or expired API key");
-  const [result] = await db
-    .select({ user: userTable })
-    .from(apiKeys)
-    .innerJoin(userTable, eq(apiKeys.userId, userTable.id))
-    .where(
-      and(
-        eq(apiKeys.keyHash, hash),
-        or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, Date.now())),
-      ),
-    );
-  if (!result) return fail(401, "Invalid or expired API key");
-  if (/^\/api\/(?:api-keys|auth)(?:\/|$)/.test(c.req.path))
+  const key =
+    c.req.header("x-api-key") ??
+    (authorization?.startsWith("Bearer ck_") ? authorization.slice(7) : undefined);
+  if (key === undefined) return next();
+  if (/^\/api\/auth(?:\/|$)/.test(c.req.path))
     return fail(403, "Sign in to manage API keys and sessions");
-  c.set("user", result.user);
+  if (!key) return fail(401, "Invalid or expired API key");
+  // Reuse Void's per-request Better Auth instance; the plugin owns verification and limits.
+  const auth = c.get("__voidAuth") as Auth;
+  const result = await auth.api.verifyApiKey({ body: { key } });
+  if (!result.valid || !result.key) {
+    if (result.error?.code === "RATE_LIMITED")
+      return c.json({ error: "API key rate limit exceeded" }, 429);
+    return fail(401, "Invalid or expired API key");
+  }
+  const user = await (await auth.$context).internalAdapter.findUserById(result.key.referenceId);
+  if (!user) return fail(401, "API key account no longer exists");
+  c.set("user", user);
   return next();
 });

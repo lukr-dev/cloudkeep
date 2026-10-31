@@ -13,10 +13,11 @@ import { useFeatures, useSession } from "../composables/session.ts";
 import { useTask } from "../composables/task.ts";
 type ApiKey = {
   id: string;
-  name: string;
-  prefix: string;
-  createdAt: number;
-  expiresAt: number | null;
+  name: string | null;
+  prefix: string | null;
+  start: string | null;
+  createdAt: string;
+  expiresAt: string | null;
 };
 const apiKeys = ref<ApiKey[]>([]);
 const apiKeyName = ref("");
@@ -24,22 +25,22 @@ const apiKeyDays = ref(90);
 const newApiKey = ref<{ id: string; key: string } | null>(null);
 function createApiKey() {
   return run(async () => {
-    const result = await api<{ item: ApiKey; key: string }>("/api/api-keys", {
+    const { key, ...item } = await api<ApiKey & { key: string }>("/api/auth/api-key/create", {
       method: "POST",
       body: {
-        name: apiKeyName.value,
-        expiresAt: apiKeyDays.value ? Date.now() + apiKeyDays.value * 86_400_000 : null,
+        name: apiKeyName.value.trim(),
+        expiresIn: apiKeyDays.value ? apiKeyDays.value * 86_400 : null,
       },
     });
-    apiKeys.value.unshift(result.item);
-    newApiKey.value = { id: result.item.id, key: result.key };
+    apiKeys.value.unshift(item);
+    newApiKey.value = { id: item.id, key };
     apiKeyName.value = "";
   });
 }
 function revokeApiKey(key: ApiKey) {
   if (!confirm(`Revoke “${key.name}”? Apps using this key will lose access immediately.`)) return;
   return run(async () => {
-    await api(`/api/api-keys/${key.id}`, { method: "DELETE" });
+    await api("/api/auth/api-key/delete", { method: "POST", body: { keyId: key.id } });
     apiKeys.value = apiKeys.value.filter((item) => item.id !== key.id);
     if (newApiKey.value?.id === key.id) newApiKey.value = null;
     notice.value = "API key revoked";
@@ -98,11 +99,11 @@ async function load() {
   const [value, templates, accessKeys] = await Promise.all([
     api<Settings>("/api/settings"),
     api<Prompts>("/api/settings/prompts"),
-    api<{ items: ApiKey[] }>("/api/api-keys"),
+    api<{ apiKeys: ApiKey[] }>("/api/auth/api-key/list?sortBy=createdAt&sortDirection=desc"),
   ]);
   populate(value);
   prompts.value = templates;
-  apiKeys.value = accessKeys.items;
+  apiKeys.value = accessKeys.apiKeys;
 }
 onMounted(() => void run(load));
 function save() {
@@ -350,13 +351,13 @@ function savePrompt(kind: "tagging" | "summary" | "detailed_summary", reset = fa
             <div class="grow">
               <strong>{{ key.name }}</strong>
               <p class="hint">
-                <code>{{ key.prefix }}…</code> · Created
+                <code>{{ key.start ?? key.prefix }}…</code> · Created
                 {{ new Date(key.createdAt).toLocaleDateString() }}
               </p>
               <p class="hint">
                 {{
                   key.expiresAt
-                    ? (key.expiresAt <= Date.now() ? "Expired " : "Expires ") +
+                    ? (new Date(key.expiresAt).getTime() <= Date.now() ? "Expired " : "Expires ") +
                       new Date(key.expiresAt).toLocaleDateString()
                     : "Never expires"
                 }}

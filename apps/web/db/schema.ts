@@ -183,19 +183,3 @@ export const bookmarkAudio = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.bookmarkId, t.kind] })],
 );
-
-export const apiKeys = sqliteTable(
-  "api_keys",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => profiles.userId, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    prefix: text("prefix").notNull(),
-    keyHash: text("key_hash").notNull().unique(),
-    createdAt: integer("created_at").notNull(),
-    expiresAt: integer("expires_at"),
-  },
-  (t) => [index("api_keys_user").on(t.userId)],
-);

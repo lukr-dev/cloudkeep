@@ -1,169 +1,183 @@
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
-import { Miniflare } from "miniflare";
+import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
 import { Hono } from "hono";
 import type { CloudEnv } from "void";
+import { betterAuth } from "better-auth";
 import { requireAuth } from "void/auth";
-import { withRuntimeEnv } from "void/_env";
+import configureAuth from "../auth.ts";
 import apiMiddleware from "../middleware/01.api.ts";
 import keyMiddleware from "../middleware/02.api-keys.ts";
-import { GET, POST } from "../routes/api/api-keys/index.ts";
-import { DELETE } from "../routes/api/api-keys/[id].ts";
-import { apiKeyHash, generateApiKey } from "./api-keys.ts";
 
-const mf = new Miniflare({
-  workers: [
-    {
-      config: {
-        name: "api-keys-test",
-        compatibilityDate: "2026-10-17",
-        manifest: {
-          mainModule: "index.js",
-          modules: {
-            "index.js": {
-              type: "esm",
-              contents: "export default { fetch() { return new Response('test'); } }",
-            },
-          },
-        },
-        env: { DB: { type: "d1", id: "api-keys-test" } },
-      },
+const database = new DatabaseSync(":memory:");
+const directory = new URL("../db/migrations/", import.meta.url);
+for (const file of readdirSync(directory)
+  .filter((file) => file.endsWith(".sql"))
+  .sort())
+  database.exec(readFileSync(new URL(file, directory), "utf8"));
+const origin = "https://cloudkeep.example.com";
+const auth = betterAuth(
+  configureAuth({
+    defaults: {
+      database,
+      baseURL: origin,
+      secret: "test-secret-with-at-least-thirty-two-characters",
+      trustedOrigins: [origin],
+      rateLimit: { enabled: false },
+      logger: { disabled: true },
     },
-  ],
-});
-const database = await mf.getD1Database("DB");
-const users = Object.fromEntries(
-  ["owner", "other"].map((id) => [
-    id,
-    {
-      id,
-      name: id,
-      email: `${id}@example.com`,
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      image: null,
-    },
-  ]),
+  } as Parameters<typeof configureAuth>[0]),
 );
 const app = new Hono<CloudEnv>();
-app.use("*", apiMiddleware);
+// Match Void's normal-session middleware before application middleware.
 app.use("*", async (c, next) => {
-  c.set("user", users[c.req.header("x-test-session") ?? ""] ?? null);
+  const state = await auth.api.getSession({ headers: c.req.raw.headers });
+  c.set("user", state?.user ?? null);
+  c.set("session", state?.session ?? null);
+  c.set("__voidAuth", auth);
   await next();
 });
+app.use("*", apiMiddleware);
 app.use("*", keyMiddleware);
 app.get("/api/me", (c) => c.json({ user: requireAuth(c) }));
-app.get("/api/api-keys", async (c) => c.json(await GET(c)));
-app.post("/api/api-keys", async (c) => {
-  const response = await POST(c);
-  if (!(response instanceof Response)) throw new Error("Expected a response from key creation");
-  return response;
-});
-app.delete("/api/api-keys/:id", async (c) => c.json(await DELETE(c)));
-app.post("/api/auth/change-password", (c) => c.json({ ok: true }));
-function request(path: string, method = "GET", session?: string, token?: string, body?: unknown) {
-  return withRuntimeEnv({ DB: database }, () =>
-    app.request(`https://cloudkeep.example${path}`, {
-      method,
-      headers: {
-        ...(session ? { "x-test-session": session } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    }),
-  );
-}
-async function create(expiresAt: number | null = null) {
-  const response = await request("/api/api-keys", "POST", "owner", undefined, {
-    name: "Import",
-    expiresAt,
+app.post("/api/bookmarks", (c) => c.json({ userId: requireAuth(c).id }));
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+const sessions: Record<string, string> = {};
+const userIds: Record<string, string> = {};
+function request(
+  path: string,
+  method = "GET",
+  session?: string,
+  key?: string,
+  body?: unknown,
+  keyHeader = "x-api-key",
+) {
+  return app.request(origin + path, {
+    method,
+    headers: {
+      Origin: origin,
+      ...(session ? { Authorization: `Bearer ${sessions[session]}` } : {}),
+      ...(key !== undefined
+        ? { [keyHeader]: keyHeader === "Authorization" ? `Bearer ${key}` : key }
+        : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  expect(response.status).toBe(201);
-  return (await response.json()) as { item: { id: string; prefix: string }; key: string };
+}
+async function create(expiresIn: number | null = null) {
+  const response = await request("/api/auth/api-key/create", "POST", "owner", undefined, {
+    name: "Import",
+    expiresIn,
+  });
+  expect(response.status).toBe(200);
+  return (await response.json()) as {
+    id: string;
+    key: string;
+    start: string;
+    expiresAt: string | null;
+  };
 }
 beforeAll(async () => {
-  const dir = new URL("../db/migrations/", import.meta.url);
-  for (const name of readdirSync(dir)
-    .filter((n) => n.endsWith(".sql"))
-    .sort())
-    for (const statement of readFileSync(new URL(name, dir), "utf8").split(
-      "--> statement-breakpoint",
-    ))
-      if (statement.trim())
-        await database.exec(statement.replace(/--[^\n]*/g, "").replace(/\n/g, " "));
-  for (const user of Object.values(users)) {
-    await database
-      .prepare(
-        "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)",
-      )
-      .bind(user.id, user.name, user.email)
-      .run();
-    await database
-      .prepare("INSERT INTO profiles (user_id, role) VALUES (?, 'user')")
-      .bind(user.id)
-      .run();
+  const context = await auth.$context;
+  for (const name of ["owner", "other"]) {
+    const user = await context.internalAdapter.createUser(
+      { name, email: `${name}@example.com`, emailVerified: true },
+      { method: "email-password" },
+    );
+    userIds[name] = user.id;
+    await context.internalAdapter.createAccount({
+      userId: user.id,
+      accountId: user.id,
+      providerId: "credential",
+      password: await context.password.hash("password-for-api-key-tests"),
+    });
+    const signedIn = await request("/api/auth/sign-in/email", "POST", undefined, undefined, {
+      email: user.email,
+      password: "password-for-api-key-tests",
+    });
+    expect(signedIn.status).toBe(200);
+    sessions[name] = ((await signedIn.json()) as { token: string }).token;
   }
 });
-afterAll(() => mf.dispose());
-it("generates independent high-entropy keys and stores only a one-way hash", async () => {
-  const a = generateApiKey();
-  const b = generateApiKey();
-  expect(a).toMatch(/^ck_[a-f0-9]{64}$/);
-  expect(a).not.toBe(b);
-  expect(await apiKeyHash(a)).not.toContain(a);
-  for (const invalid of ["", "ck_short", a + "x", a.replace("ck_", "other_")])
-    expect(await apiKeyHash(invalid)).toBeNull();
-  const { item, key } = await create();
-  const row = await database.prepare("SELECT * FROM api_keys WHERE id = ?").bind(item.id).first();
-  expect(row?.key_hash).toBe(await apiKeyHash(key));
-  expect(Object.values(row ?? {})).not.toContain(key);
-  const listed = await request("/api/api-keys", "GET", "owner");
+afterAll(() => database.close());
+it("uses Better Auth creation, hash-only storage and secret-free listing", async () => {
+  const first = await create(30 * 86400);
+  const second = await create();
+  expect(first.key).toMatch(/^ck_[a-zA-Z]{64}$/);
+  expect(first.key).not.toBe(second.key);
+  expect(second.expiresAt).toBeNull();
+  const row = database.prepare("SELECT * FROM apikey WHERE id = ?").get(first.id);
+  expect(row?.key).toEqual(expect.any(String));
+  expect(row?.key).not.toBe(first.key);
+  expect(Object.values(row ?? {})).not.toContain(first.key);
+  const listed = await request("/api/auth/api-key/list", "GET", "owner");
+  expect(listed.status).toBe(200);
   const text = await listed.text();
-  expect(text).toContain(item.prefix);
-  expect(text).not.toContain(key);
-  expect(text).not.toContain("keyHash");
-  expect(text).not.toContain("key_hash");
+  expect(text).toContain(first.start);
+  expect(text).not.toContain(first.key);
+  expect(text).not.toContain(String(row?.key));
 });
-it("authenticates as the owner, isolates management by owner, and revokes immediately", async () => {
-  const { item, key } = await create();
-  const authenticated = await request("/api/me", "GET", undefined, key);
-  expect(authenticated.status).toBe(200);
-  expect(await authenticated.json()).toMatchObject({ user: { id: "owner" } });
-  expect((await request(`/api/api-keys/${item.id}`, "DELETE", "other")).status).toBe(404);
-  const otherKeys = await request("/api/api-keys", "GET", "other");
-  expect(await otherKeys.json()).toEqual({ items: [] });
-  expect((await request(`/api/api-keys/${item.id}`, "DELETE", "owner")).status).toBe(200);
+it("authenticates through both headers as the owner and revokes immediately", async () => {
+  const { id, key } = await create();
+  for (const header of ["x-api-key", "Authorization"]) {
+    const authenticated = await request("/api/me", "GET", undefined, key, undefined, header);
+    expect(authenticated.status).toBe(200);
+    expect(await authenticated.json()).toMatchObject({ user: { id: userIds.owner } });
+    const override = await request("/api/me", "GET", "other", key, undefined, header);
+    expect(await override.json()).toMatchObject({ user: { id: userIds.owner } });
+    const saved = await request("/api/bookmarks", "POST", undefined, key, {}, header);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ userId: userIds.owner });
+  }
+  expect(
+    (await request("/api/auth/api-key/delete", "POST", "other", undefined, { keyId: id })).status,
+  ).toBe(404);
+  const otherKeys = await request("/api/auth/api-key/list", "GET", "other");
+  expect(await otherKeys.json()).toMatchObject({ apiKeys: [] });
+  expect(
+    (await request("/api/auth/api-key/delete", "POST", "owner", undefined, { keyId: id })).status,
+  ).toBe(200);
   expect((await request("/api/me", "GET", undefined, key)).status).toBe(401);
 });
-it("rejects malformed, unknown and expired keys even with a valid cookie session", async () => {
-  const { item, key } = await create();
-  await database
-    .prepare("UPDATE api_keys SET expires_at = ? WHERE id = ?")
-    .bind(Date.now() - 1, item.id)
-    .run();
-  for (const token of [key, generateApiKey(), "ck_invalid"])
+it("rejects malformed, unknown, empty and expired keys without session fallback", async () => {
+  const { id, key } = await create();
+  database.prepare("UPDATE apikey SET expiresAt = ? WHERE id = ?").run(Date.now() - 1, id);
+  for (const token of [key, "ck_" + "x".repeat(64), "ck_invalid", ""])
     expect((await request("/api/me", "GET", "owner", token)).status).toBe(401);
   expect((await request("/api/me", "GET", "owner")).status).toBe(200);
 });
-it("requires a normal session for key management and blocks keys from auth endpoints", async () => {
-  const { item, key } = await create();
+it("requires a real login for key management and prevents account credential changes", async () => {
+  const { id, key } = await create();
   for (const [path, method, body] of [
-    ["/api/api-keys", "GET", undefined],
-    ["/api/api-keys", "POST", { name: "Nested key" }],
-    [`/api/api-keys/${item.id}`, "DELETE", undefined],
+    ["/api/auth/api-key/list", "GET", undefined],
+    ["/api/auth/api-key/create", "POST", { name: "Nested key" }],
+    ["/api/auth/api-key/delete", "POST", { keyId: id }],
     ["/api/auth/change-password", "POST", {}],
   ] as const)
     expect((await request(path, method, "owner", key, body)).status).toBe(403);
-  expect((await request("/api/api-keys")).status).toBe(401);
+  expect((await request("/api/auth/api-key/list")).status).toBe(401);
   expect(
-    (await request("/api/api-keys", "POST", undefined, undefined, { name: "No session" })).status,
+    (
+      await request("/api/auth/api-key/create", "POST", undefined, undefined, {
+        name: "No session",
+      })
+    ).status,
   ).toBe(401);
   for (const body of [
     { name: "" },
-    { name: "Valid", expiresAt: Date.now() - 1 },
-    { name: "Valid", userId: "other" },
+    { name: "Valid", expiresIn: -1 },
+    { name: "Valid", userId: userIds.other },
   ])
-    expect((await request("/api/api-keys", "POST", "owner", undefined, body)).status).toBe(400);
+    expect((await request("/api/auth/api-key/create", "POST", "owner", undefined, body)).ok).toBe(
+      false,
+    );
+});
+it("enforces the plugin's per-key rate limit and returns 429", async () => {
+  const { id, key } = await create();
+  database
+    .prepare("UPDATE apikey SET rateLimitMax = 1, rateLimitTimeWindow = 60000 WHERE id = ?")
+    .run(id);
+  expect((await request("/api/me", "GET", undefined, key)).status).toBe(200);
+  expect((await request("/api/me", "GET", undefined, key)).status).toBe(429);
 });

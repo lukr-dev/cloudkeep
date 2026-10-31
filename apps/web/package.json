@@ -9,6 +9,7 @@
     "db:migrate": "void db migrate"
   },
   "dependencies": {
+    "@better-auth/api-key": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/geist-mono": "catalog:",
     "@tiptap/markdown": "catalog:",
