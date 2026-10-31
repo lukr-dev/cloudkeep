@@ -3,22 +3,48 @@ import { build } from "esbuild";
 import { Miniflare } from "miniflare";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import type { Metadata } from "./metadata.ts";
+import { MAX_BODY_BYTES, type Metadata } from "./metadata.ts";
 
 let runtime: Miniflare;
 beforeAll(async () => {
   const bundle = await build({
     stdin: {
-      contents: `import { extractMetadata, fetchMetadata } from './metadata.ts';
+      contents: `import { extractMetadata, fetchMetadata, MAX_BODY_BYTES } from './metadata.ts';
       export default { async fetch(request) {
         const input = await request.json();
         if (input.fetch) {
           let count = 0;
-          try { await fetchMetadata('https://example.com', async () => {
+          let cancelled = false;
+          let offset = 0;
+          const prefix = '<head><meta property="og:title" content="Large title"><meta property="og:description" content="Large description"><link rel="icon" href="/large.ico"></head><body><p>Readable beginning</p><script>';
+          const html = input.fetch === 'text-full'
+            ? '<body>' + 'a'.repeat(25000) + '</body><meta property="og:title" content="Late title">'
+            : input.fetch === 'small' || input.fetch === 'declared'
+            ? '<body>Small page</body>'
+            : input.fetch === 'exact'
+              ? prefix.padEnd(MAX_BODY_BYTES, 'x')
+              : prefix.padEnd(MAX_BODY_BYTES - 50, 'x') + '</script><p>' + 'B'.repeat(100) + 'x'.repeat(MAX_BODY_BYTES);
+          const data = new TextEncoder().encode(html);
+          try { const metadata = await fetchMetadata('https://example.com', async () => {
             count++;
             if (input.fetch === 'private-redirect') return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/' } });
-            return new Response('x'.repeat(524289), { headers: { 'content-type': 'text/html' } });
-          }); return Response.json({ failed: false }); }
+            const body = new ReadableStream({
+              pull(stream) {
+                if (offset >= data.length) { stream.close(); return; }
+                const end = Math.min(offset + 65539, data.length);
+                stream.enqueue(data.subarray(offset, end));
+                offset = end;
+              },
+              cancel() { cancelled = true; },
+            }, { highWaterMark: 0 });
+            return new Response(body, { headers: {
+              'content-type': 'text/html',
+              ...(input.fetch === 'declared' ? { 'content-length': String(MAX_BODY_BYTES * 2) } : {}),
+            } });
+          });
+          // Let pipe cancellation settle before reporting the upstream state.
+          await new Promise(resolve => setTimeout(resolve, 0));
+          return Response.json({ metadata, cancelled, downloaded: offset, failed: false }); }
           catch { return Response.json({ failed: true, count }); }
         }
         return Response.json(await extractMetadata(new Response(input.html), 'https://example.com/posts/one'));
@@ -67,6 +93,7 @@ it("uses OpenGraph ahead of Twitter/title and resolves relative assets", async (
     siteName: "Example",
     contentText: "Hello\n\nReadable page.",
     contentTruncated: false,
+    pageTruncated: false,
   });
 });
 it("supports Twitter and ordinary HTML fallbacks and caps text", async () => {
@@ -84,14 +111,50 @@ it("supports Twitter and ordinary HTML fallbacks and caps text", async () => {
   expect(result.contentTruncated).toBe(true);
   expect(result.faviconUrl).toBe("https://example.com/favicon.ico");
 });
-it("rejects oversized streams and private redirects before fetching a second target", async () => {
-  for (const mode of ["size", "private-redirect"]) {
-    const response = await runtime.dispatchFetch("https://unit.test/", {
-      method: "POST",
-      body: JSON.stringify({ fetch: mode }),
-    });
-    expect(await response.json()).toEqual({ failed: true, count: 1 });
+async function fetchPage(mode: string) {
+  const response = await runtime.dispatchFetch("https://unit.test/", {
+    method: "POST",
+    body: JSON.stringify({ fetch: mode }),
+  });
+  return response.json() as Promise<{
+    metadata: Metadata;
+    cancelled: boolean;
+    downloaded: number;
+    failed: boolean;
+    count?: number;
+  }>;
+}
+it("truncates oversized streams, preserves partial metadata and cancels the download", async () => {
+  const result = await fetchPage("large");
+  expect(result.failed).toBe(false);
+  expect(result.metadata).toMatchObject({
+    title: "Large title",
+    description: "Large description",
+    faviconUrl: "https://example.com/large.ico",
+    contentText: "Readable beginning\n\n" + "B".repeat(38),
+    contentTruncated: false,
+    pageTruncated: true,
+  });
+  expect(result.cancelled).toBe(true);
+  expect(result.downloaded).toBeLessThan(MAX_BODY_BYTES + 65539);
+});
+it("accepts large declared Content-Length and marks small pages as complete", async () => {
+  for (const mode of ["declared", "small", "exact"]) {
+    const result = await fetchPage(mode);
+    expect(result.failed).toBe(false);
+    expect(result.metadata.pageTruncated).toBe(false);
+    if (mode !== "exact") expect(result.metadata.contentText).toBe("Small page");
   }
+});
+it("continues reading after the head and text limit", async () => {
+  const { metadata } = await fetchPage("text-full");
+  expect(metadata.title).toBe("Late title");
+  expect(metadata.contentText).toHaveLength(20_000);
+  expect(metadata.contentTruncated).toBe(true);
+  expect(metadata.pageTruncated).toBe(false);
+});
+it("rejects private redirects before fetching a second target", async () => {
+  expect(await fetchPage("private-redirect")).toEqual({ failed: true, count: 1 });
 });
 it("decodes entities and handles hidden void elements without hiding the rest of the page", async () => {
   const result = await extract(

@@ -1,0 +1,1 @@
+ALTER TABLE `bookmarks` ADD `page_truncated` integer DEFAULT false NOT NULL;
