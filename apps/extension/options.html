@@ -25,6 +25,18 @@
         ><input id="badge" type="checkbox" /> Show a badge on pages already in CloudKeep (looks up
         each page you visit)</label
       >
+      <label
+        >Share mode<select id="share-mode">
+          <option value="quick">Quick save</option>
+          <option value="ask">Ask</option>
+        </select></label
+      >
+      <label
+        >Quick save list<select id="default-list">
+          <option value="">No list</option>
+        </select></label
+      >
+      <p id="list-warning" role="status" class="muted"></p>
       <p id="error" role="alert"></p>
     </main>
     <script type="module" src="/src/options.ts"></script>

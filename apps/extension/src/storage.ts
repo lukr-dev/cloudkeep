@@ -1,7 +1,13 @@
-import { DEFAULT_SERVER, type Settings, type ListCache } from "./logic.ts";
+import { settingsDefaults, type Settings, type ListCache } from "./logic.ts";
 export async function settings(): Promise<Settings> {
-  const data = await chrome.storage.local.get<Partial<Settings>>(["server", "token", "badge"]);
-  return { server: data.server ?? DEFAULT_SERVER, token: data.token, badge: data.badge !== false };
+  const data = await chrome.storage.local.get<Partial<Settings>>([
+    "server",
+    "token",
+    "badge",
+    "shareMode",
+    "defaultList",
+  ]);
+  return settingsDefaults(data);
 }
 export async function clearToken(token?: string) {
   await sessionMessage({ type: "clearSession", token });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   ApiError,
+  settingsDefaults,
   SaveSession,
   SessionWrites,
   LookupGuard,
@@ -264,4 +265,170 @@ it("serializes a stale compare-and-clear with a new sign-in", async () => {
     if (token === "old") token = undefined;
   });
   expect(token).toBe("new");
+});
+
+describe("share modes", () => {
+  const bookmark = { id: "b", url: "https://example.com", title: "Example", listIds: ["a"] };
+  function open(request: ReturnType<typeof client>, config = {}) {
+    return new SaveSession(
+      request,
+      bookmark.url,
+      vi.fn().mockResolvedValue(undefined),
+      async () => [list("a"), list("b")],
+      async () => [],
+      config,
+    );
+  }
+  it("defaults to quick save without a list", async () => {
+    expect(settingsDefaults({})).toMatchObject({ shareMode: "quick", defaultList: "" });
+    const request = vi.fn().mockResolvedValue({ bookmark, alreadyExists: false });
+    await open(request).done;
+    expect(request).toHaveBeenCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: [],
+    });
+  });
+  it("quick saves with the default list without waiting for list loading", async () => {
+    const request = vi.fn().mockResolvedValue({ bookmark, alreadyExists: true });
+    const session = new SaveSession(
+      request,
+      bookmark.url,
+      vi.fn().mockResolvedValue(undefined),
+      () => new Promise<never>(() => {}),
+      async () => [],
+      { defaultList: "a" },
+    );
+    await session.done;
+    expect(request).toHaveBeenCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: ["a"],
+    });
+    expect(session.state.selected.a).toBe(true);
+    expect(session.state.result?.alreadyExists).toBe(true);
+  });
+  it("retries quick save without a deleted default list", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(404, "List not found"))
+      .mockResolvedValue({ bookmark: { ...bookmark, listIds: [] }, alreadyExists: false });
+    const session = open(request, { defaultList: "deleted" });
+    await session.done;
+    expect(request).toHaveBeenLastCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: [],
+    });
+    expect(session.state.status).toBe("saved");
+    expect(session.state.error).toMatch(/Quick save list was deleted/);
+  });
+  it("falls back to a retryable picker after quick save fails, except on 401", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({ bookmark, alreadyExists: false });
+    const session = open(request, { defaultList: "a" });
+    await session.done;
+    expect(session.state).toMatchObject({
+      status: "picking",
+      error: "offline",
+      selected: { a: true },
+    });
+    await session.toggle("b");
+    await session.submit();
+    expect(request).toHaveBeenLastCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: ["a", "b"],
+    });
+    expect(session.state.status).toBe("saved");
+    const expired = open(vi.fn().mockRejectedValue(new ApiError(401, "expired")));
+    await expired.done;
+    expect(expired.state).toMatchObject({ status: "failed", unauthorized: true });
+  });
+  it("retains picker membership during Save and lets a failed save revise queued choices", async () => {
+    const saving = deferred<Saved>();
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ bookmark: null })
+      .mockReturnValueOnce(saving.promise)
+      .mockResolvedValue({});
+    const session = open(request, { shareMode: "ask", defaultList: "a" });
+    await session.done;
+    const submitting = session.submit();
+    expect(session.state.selected.a).toBe(true);
+    const toggling = session.toggle("a");
+    saving.resolve({ bookmark, alreadyExists: false });
+    await Promise.all([submitting, toggling]);
+    await session.queue.idle();
+    expect(request).toHaveBeenLastCalledWith("/api/bookmarks/b/lists/a", "DELETE", undefined);
+    expect(session.state.selected.a).toBe(false);
+
+    let reject!: (reason: Error) => void;
+    const failing = new Promise((_, fail) => {
+      reject = fail;
+    });
+    const retryRequest = vi
+      .fn()
+      .mockReturnValueOnce(failing)
+      .mockResolvedValue({ bookmark: { ...bookmark, listIds: [] }, alreadyExists: false });
+    const retry = open(retryRequest);
+    await Promise.resolve();
+    const pendingToggle = retry.toggle("a");
+    reject(new Error("offline"));
+    await retry.done;
+    await pendingToggle;
+    expect(retry.state.selected.a).toBe(true);
+    await retry.toggle("a");
+    await retry.submit();
+    expect(retryRequest).toHaveBeenLastCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: [],
+    });
+    expect(retryRequest).toHaveBeenCalledTimes(2);
+  });
+  it("checks Ask duplicates and applies existing list changes immediately", async () => {
+    const request = vi.fn().mockResolvedValueOnce({ bookmark }).mockResolvedValue({});
+    const session = open(request, { shareMode: "ask" });
+    expect(session.state.status).toBe("checking");
+    await session.done;
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+      "/api/bookmarks/lookup?url=https%3A%2F%2Fexample.com",
+    );
+    expect(session.state).toMatchObject({ status: "existing", selected: { a: true } });
+    await session.toggle("a");
+    expect(request).toHaveBeenLastCalledWith("/api/bookmarks/b/lists/a", "DELETE", undefined);
+    request.mockResolvedValue({ bookmark, alreadyExists: true });
+    await session.submit();
+    expect(session.state).toMatchObject({ status: "saved", result: { alreadyExists: true } });
+  });
+  it("keeps new Ask selections local until Save, including the default", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ bookmark: null })
+      .mockResolvedValue({ bookmark, alreadyExists: false });
+    const session = open(request, { shareMode: "ask", defaultList: "a" });
+    await session.done;
+    expect(session.state.status).toBe("picking");
+    await session.toggle("b");
+    expect(request).toHaveBeenCalledTimes(1);
+    await session.submit();
+    expect(request).toHaveBeenLastCalledWith("/api/bookmarks", "POST", {
+      url: bookmark.url,
+      listIds: ["a", "b"],
+    });
+  });
+  it("allows saving after a failed lookup and caps local selection at 30", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("lookup failed"))
+      .mockResolvedValue({ bookmark, alreadyExists: false });
+    const session = open(request, { shareMode: "ask" });
+    await session.done;
+    expect(session.state).toMatchObject({ status: "picking", error: "lookup failed" });
+    for (let i = 0; i < 31; i++) await session.toggle(String(i));
+    expect(Object.values(session.state.selected).filter(Boolean)).toHaveLength(30);
+    expect(session.state.error).toBe("Choose up to 30 lists.");
+    await session.toggle("0");
+    await session.toggle("30");
+    await session.submit();
+    expect((request.mock.calls.at(-1)![2] as { listIds: string[] }).listIds).toHaveLength(30);
+  });
 });
