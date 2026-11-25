@@ -5,12 +5,13 @@ const status = document.querySelector<HTMLElement>("#status")!;
 const error = document.querySelector<HTMLElement>("#error")!;
 const filter = document.querySelector<HTMLInputElement>("#filter")!;
 const container = document.querySelector<HTMLElement>("#lists")!;
+const save = document.querySelector<HTMLButtonElement>("#save")!;
 const undo = document.querySelector<HTMLButtonElement>("#undo")!;
 const signIn = document.querySelector<HTMLButtonElement>("#settings")!;
 let lists: List[] = [];
 let state: SessionState = { status: "saving", lists: [], selected: {}, undoing: false };
 let page: { tabId: number; url: string };
-function intent(type: "save" | "toggle" | "undo", listId?: string) {
+function intent(type: "submit" | "toggle" | "undo", listId?: string) {
   void chrome.runtime
     .sendMessage({ type, ...page, listId })
     .then((result) => {
@@ -25,6 +26,7 @@ function signedOut() {
   filter.hidden = true;
   container.hidden = true;
   undo.hidden = true;
+  save.hidden = true;
 }
 function fail(reason: unknown) {
   error.textContent = reason instanceof Error ? reason.message : "Something went wrong. Try again.";
@@ -45,6 +47,17 @@ filter.oninput = render;
 signIn.onclick = () => void chrome.runtime.openOptionsPage();
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") window.close();
+  if (
+    !save.hidden &&
+    !save.disabled &&
+    event.key === "Enter" &&
+    (event.ctrlKey || event.metaKey || (event.target === filter && !filter.value)) &&
+    !event.isComposing
+  ) {
+    event.preventDefault();
+    intent("submit");
+    return;
+  }
   if (undo.disabled || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
   const index =
     event.key === "Enter" && event.target === filter
@@ -87,21 +100,31 @@ async function start() {
     state = next;
     lists = state.lists;
     status.textContent = {
+      checking: "Checking…",
+      picking: "Save to CloudKeep",
+      existing: "Already saved",
       saving: "Saving…",
-      saved: state.result?.alreadyExists ? "Already saved" : "Saved",
+      saved: state.result?.alreadyExists ? "Already saved · moved to top" : "Saved",
       undone: "Removed",
       failed: "Couldn't save",
     }[state.status];
     error.textContent = state.error ?? "";
+    save.hidden = state.status !== "picking" && state.status !== "existing";
+    save.textContent = state.status === "existing" ? "Move to top" : "Save";
+    save.disabled = state.undoing;
     undo.hidden = state.status !== "saved" || Boolean(state.result?.alreadyExists);
     undo.disabled = state.undoing;
-    filter.disabled = state.undoing || state.status === "failed" || state.status === "undone";
+    filter.disabled =
+      state.undoing ||
+      state.status === "failed" ||
+      state.status === "undone" ||
+      state.status === "checking";
     container.inert = filter.disabled;
     render();
     if (state.status === "undone") window.close();
   });
   port.postMessage({ type: "watch", ...page });
-  intent("save");
+  save.onclick = () => intent("submit");
   undo.onclick = () => intent("undo");
 }
 chrome.storage.onChanged.addListener((changes, area) => {

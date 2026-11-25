@@ -15,7 +15,7 @@ const writes = new SessionWrites();
 function clearToken(token?: string) {
   return writes.run(async () => {
     if ((await settings()).token === token)
-      await chrome.storage.local.remove(["token", "listCache"]);
+      await chrome.storage.local.remove(["token", "listCache", "defaultList"]);
   });
 }
 const guard = new LookupGuard();
@@ -132,6 +132,7 @@ chrome.tabs.onActivated.addListener(activated);
 chrome.tabs.onUpdated.addListener(updated);
 chrome.tabs.onRemoved.addListener(removed);
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes.shareMode || changes.defaultList)) sessions.clear();
   if (area === "local" && (changes.badge || changes.token || changes.server)) {
     guard.invalidate();
     if (changes.token || changes.server) sessions.clear();
@@ -144,9 +145,15 @@ const ports = new Map<
   chrome.runtime.Port,
   { tabId: number; url: string; unsubscribe?: () => void }
 >();
-function session(tabId: number, url: string) {
+async function session(tabId: number, url: string, opening = false) {
   const key = JSON.stringify([tabId, url]);
   let pending = sessions.get(key);
+  if (opening && pending && (await settings()).shareMode === "ask") {
+    const previous = await pending;
+    await previous.done;
+    await previous.queue.idle();
+    if (previous.state.status !== "saving" && !previous.state.undoing) pending = undefined;
+  }
   if (!pending) {
     pending = (async () => {
       const config = await settings();
@@ -158,13 +165,13 @@ function session(tabId: number, url: string) {
         async (saved) => {
           const epoch = generation;
           const latest = await settings();
-          if (!latest.badge || latest.token !== config.token || latest.server !== config.server)
-            return;
+          if (latest.token !== config.token || latest.server !== config.server) return;
           revisions.set(tabId, (revisions.get(tabId) ?? 0) + 1);
           clearTimeout(timers.get(tabId));
           await remember(url, saved);
           const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-          if (tab?.url === url && enabled && epoch === generation) await badge(tabId, saved);
+          if (tab?.url === url && latest.badge && enabled && epoch === generation)
+            await badge(tabId, saved);
         },
         async () => {
           const items = await fetchLists(api);
@@ -178,6 +185,7 @@ function session(tabId: number, url: string) {
           return items;
         },
         async () => cachedLists(await readLists(), config),
+        config,
       );
       return current;
     })();
@@ -200,7 +208,7 @@ chrome.runtime.onConnect.addListener((port) => {
     };
     ports.get(port)?.unsubscribe?.();
     ports.set(port, watching);
-    void session(watching.tabId, watching.url)
+    void session(watching.tabId, watching.url, true)
       .then((current) => {
         if (ports.get(port) !== watching) return;
         watching.unsubscribe = current.subscribe((state) => {
@@ -239,7 +247,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         )
           throw new Error("Invalid session");
         await writes.run(async () => {
-          await chrome.storage.local.remove("listCache");
+          await chrome.storage.local.remove(["listCache", "defaultList"]);
           await chrome.storage.local.set({
             server: serverOrigin(message.server),
             token: message.token,
@@ -251,12 +259,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         await clearToken(message.token);
         return;
       case "save":
+      case "submit":
       case "toggle":
       case "undo": {
         if (typeof message.tabId !== "number" || !eligible(message.url))
           throw new Error("Invalid page");
         const current = await session(message.tabId, message.url);
         if (message.type === "save") await current.done;
+        else if (message.type === "submit") await current.submit();
         else if (message.type === "toggle" && typeof message.listId === "string")
           await current.toggle(message.listId);
         else if (message.type === "undo") await current.undo();

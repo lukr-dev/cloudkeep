@@ -57,10 +57,12 @@ p {
   overflow: hidden;
 }
 input,
+select,
 button {
   font: inherit;
 }
-input:not([type="checkbox"]) {
+input:not([type="checkbox"]),
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
