@@ -1,11 +1,15 @@
 import "./style.css";
-import { client, serverOrigin } from "./logic.ts";
-import { clearToken, sessionMessage, settings } from "./storage.ts";
+import { cachedLists, client, fetchLists, serverOrigin, type List } from "./logic.ts";
+import { clearToken, readLists, sessionMessage, settings } from "./storage.ts";
 const form = document.querySelector<HTMLFormElement>("#signin")!;
 const server = document.querySelector<HTMLInputElement>("#server")!;
 const email = document.querySelector<HTMLInputElement>("#email")!;
 const password = document.querySelector<HTMLInputElement>("#password")!;
 const badge = document.querySelector<HTMLInputElement>("#badge")!;
+const shareMode = document.querySelector<HTMLSelectElement>("#share-mode")!;
+const defaultList = document.querySelector<HTMLSelectElement>("#default-list")!;
+const warning = document.querySelector<HTMLElement>("#list-warning")!;
+let renderVersion = 0;
 const signout = document.querySelector<HTMLButtonElement>("#signout")!;
 const status = document.querySelector<HTMLElement>("#status")!;
 const error = document.querySelector<HTMLElement>("#error")!;
@@ -13,14 +17,41 @@ function fail(reason: unknown) {
   error.textContent = reason instanceof Error ? reason.message : "Request failed.";
 }
 async function render() {
+  const version = ++renderVersion;
   const config = await settings();
   server.value = config.server;
   badge.checked = config.badge;
+  shareMode.value = config.shareMode ?? "quick";
+  defaultList.disabled = !config.token;
+  warning.textContent = "";
+  function showLists(lists: List[], loaded: boolean) {
+    defaultList.replaceChildren(
+      new Option("No list", ""),
+      ...lists.map((list) => new Option(list.name, list.id)),
+    );
+    const missing = Boolean(
+      config.defaultList && !lists.some((list) => list.id === config.defaultList),
+    );
+    if (missing) defaultList.add(new Option("Deleted or unavailable list", config.defaultList));
+    defaultList.value = config.defaultList ?? "";
+    warning.textContent =
+      missing && loaded ? "Your default list was deleted. Choose another list or “No list”." : "";
+  }
+  showLists([], false);
   form.hidden = Boolean(config.token);
   signout.hidden = !config.token;
   status.textContent = config.token
     ? `Signed in to ${config.server}`
     : "Sign in to save pages from your toolbar.";
+  if (!config.token) return;
+  const cache = await readLists();
+  if (version !== renderVersion) return;
+  showLists(cachedLists(cache, config), false);
+  const lists = await fetchLists(client(config, () => clearToken(config.token)));
+  if (version !== renderVersion) return;
+  config.defaultList = (await settings()).defaultList;
+  if (version !== renderVersion) return;
+  showLists(lists, true);
 }
 form.onsubmit = async (event) => {
   event.preventDefault();
@@ -65,6 +96,13 @@ signout.onclick = async () => {
   await sessionMessage({ type: "signOut", token: config.token });
   signout.disabled = false;
   await render();
+};
+shareMode.onchange = () => {
+  void chrome.storage.local.set({ shareMode: shareMode.value }).catch(fail);
+};
+defaultList.onchange = () => {
+  warning.textContent = "";
+  void chrome.storage.local.set({ defaultList: defaultList.value }).catch(fail);
 };
 badge.onchange = () => {
   void chrome.storage.local.set({ badge: badge.checked }).catch(fail);

@@ -104,3 +104,36 @@ it("a stale 401 clear cannot remove the worker's newly stored session", async ()
   await send({ type: "signOut", token: "new" });
   expect(data.token).toBeUndefined();
 });
+it("reads per-device defaults and clears the account-specific list on account changes", async () => {
+  const { data, send } = await worker();
+  const { settings } = await import("./storage.ts");
+  expect(await settings()).toMatchObject({ shareMode: "quick", defaultList: "" });
+  data.defaultList = "private-list";
+  data.shareMode = "ask";
+  await send({ type: "setSession", server: "https://keep.example", token: "new" });
+  expect(data.defaultList).toBeUndefined();
+  expect(data.shareMode).toBe("ask");
+  data.defaultList = "another-list";
+  await send({ type: "signOut", token: "new" });
+  expect(data.defaultList).toBeUndefined();
+});
+it("runs Ask lookup on user action even with badges disabled", async () => {
+  const { data, fetcher, send } = await worker();
+  data.badge = false;
+  data.shareMode = "ask";
+  fetcher.mockImplementation(
+    async (input) =>
+      new Response(
+        JSON.stringify(
+          typeof input === "string" && input.includes("/api/lists")
+            ? { items: [] }
+            : { bookmark: null },
+        ),
+      ),
+  );
+  await send({ type: "save", tabId: 1, url: "https://example.com" });
+  expect(
+    fetcher.mock.calls.filter(([url]) => typeof url === "string" && url.includes("/lookup?")),
+  ).toHaveLength(1);
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
