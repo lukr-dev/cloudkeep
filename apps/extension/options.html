@@ -7,36 +7,48 @@
   </head>
   <body class="options">
     <main>
-      <h1>CloudKeep</h1>
-      <p id="status" role="status"></p>
-      <form id="signin">
-        <label>Server URL<input id="server" type="url" required /></label
-        ><label>Email<input id="email" type="email" autocomplete="username" required /></label
-        ><label
-          >Password<input
-            id="password"
-            type="password"
-            autocomplete="current-password"
-            required /></label
-        ><button>Sign in</button>
-      </form>
-      <button id="signout" hidden>Sign out</button
-      ><label class="badge-option"
-        ><input id="badge" type="checkbox" /> Show a badge on pages already in CloudKeep (looks up
-        each page you visit)</label
-      >
-      <label
-        >Share mode<select id="share-mode">
-          <option value="quick">Quick save</option>
-          <option value="ask">Ask</option>
-        </select></label
-      >
-      <label
-        >Quick save list<select id="default-list">
-          <option value="">No list</option>
-        </select></label
-      >
-      <p id="list-warning" role="status" class="muted"></p>
+      <header class="settings-header">
+        <img src="icons/48.png" width="48" height="48" alt="" />
+        <div>
+          <h1>CloudKeep</h1>
+          <p class="muted">Extension settings</p>
+        </div>
+      </header>
+      <section class="card" aria-labelledby="account-heading">
+        <h2 id="account-heading">Account</h2>
+        <p id="status" role="status" class="muted"></p>
+        <form id="signin">
+          <label>Server URL<input id="server" type="url" required /></label>
+          <label>Email<input id="email" type="email" autocomplete="username" required /></label>
+          <label
+            >Password<input id="password" type="password" autocomplete="current-password" required
+          /></label>
+          <button class="primary">Sign in</button>
+        </form>
+        <button id="signout" hidden>Sign out</button>
+      </section>
+      <section class="card" aria-labelledby="saving-heading">
+        <h2 id="saving-heading">Saving</h2>
+        <label
+          >Default list<select id="default-list">
+            <option value="">No list</option>
+          </select></label
+        >
+        <p class="muted">
+          New saves go into this list. You can change lists in the popup right after saving.
+        </p>
+        <p id="list-warning" role="status" class="muted"></p>
+      </section>
+      <section class="card" aria-labelledby="indicator-heading">
+        <h2 id="indicator-heading">Page indicator</h2>
+        <label class="badge-option"
+          ><input id="badge" type="checkbox" /> Show when the current page is already saved</label
+        >
+        <p class="muted">
+          Looks up each page you visit. Turn off to keep browsing private; duplicates are still
+          detected when you save.
+        </p>
+      </section>
       <p id="error" role="alert"></p>
     </main>
     <script type="module" src="/src/options.ts"></script>

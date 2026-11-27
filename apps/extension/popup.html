@@ -7,22 +7,30 @@
   </head>
   <body class="popup">
     <main>
-      <h1 id="status" role="status">Checking…</h1>
-      <p id="page" class="muted"></p>
-      <input
-        id="filter"
-        type="search"
-        placeholder="Filter lists…"
-        aria-label="Filter lists"
-        autofocus
-      />
-      <div id="lists" aria-label="Lists"></div>
+      <header class="save-status">
+        <h1 id="status" role="status">◌ Saving…</h1>
+        <p id="page" class="page-title"></p>
+        <p id="domain" class="muted"></p>
+      </header>
+      <section id="list-section" class="list-section" aria-labelledby="lists-heading">
+        <h2 id="lists-heading">Lists</h2>
+        <p class="muted hint">Tap to add or remove</p>
+        <input
+          id="filter"
+          type="search"
+          placeholder="Filter lists…"
+          aria-label="Filter lists"
+          hidden
+        />
+        <div id="lists"></div>
+      </section>
       <p id="error" role="alert"></p>
-      <button id="save" hidden>Save</button>
-      <button id="settings" hidden>Sign in to CloudKeep</button>
       <footer>
-        <a id="open" target="_blank" rel="noopener">Open CloudKeep ↗</a
-        ><button id="undo" hidden>Undo</button>
+        <button id="save" class="primary">Done</button>
+        <div class="footer-links">
+          <button id="undo" class="text-button" hidden>Undo</button>
+          <a id="open" target="_blank" rel="noopener">Open CloudKeep ↗</a>
+        </div>
       </footer>
     </main>
     <script type="module" src="/src/popup.ts"></script>

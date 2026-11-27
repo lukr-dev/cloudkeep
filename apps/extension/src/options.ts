@@ -6,7 +6,6 @@ const server = document.querySelector<HTMLInputElement>("#server")!;
 const email = document.querySelector<HTMLInputElement>("#email")!;
 const password = document.querySelector<HTMLInputElement>("#password")!;
 const badge = document.querySelector<HTMLInputElement>("#badge")!;
-const shareMode = document.querySelector<HTMLSelectElement>("#share-mode")!;
 const defaultList = document.querySelector<HTMLSelectElement>("#default-list")!;
 const warning = document.querySelector<HTMLElement>("#list-warning")!;
 let renderVersion = 0;
@@ -21,7 +20,6 @@ async function render() {
   const config = await settings();
   server.value = config.server;
   badge.checked = config.badge;
-  shareMode.value = config.shareMode ?? "quick";
   defaultList.disabled = !config.token;
   warning.textContent = "";
   function showLists(lists: List[], loaded: boolean) {
@@ -96,9 +94,6 @@ signout.onclick = async () => {
   await sessionMessage({ type: "signOut", token: config.token });
   signout.disabled = false;
   await render();
-};
-shareMode.onchange = () => {
-  void chrome.storage.local.set({ shareMode: shareMode.value }).catch(fail);
 };
 defaultList.onchange = () => {
   warning.textContent = "";

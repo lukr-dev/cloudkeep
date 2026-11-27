@@ -37,13 +37,15 @@ async function worker() {
       for (const key of [keys].flat()) delete data[key];
     }),
   };
+  const updated =
+    event<(id: number, info: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void>();
   vi.stubGlobal("chrome", {
-    action: { setBadgeBackgroundColor: vi.fn(), setBadgeText: vi.fn() },
+    action: { setIcon: vi.fn(), setBadgeBackgroundColor: vi.fn(), setBadgeText: vi.fn() },
     tabs: {
       get: getTab,
       query: vi.fn().mockResolvedValue([{ id: 1, active: true }]),
       onActivated: event(),
-      onUpdated: event(),
+      onUpdated: updated,
       onRemoved: event(),
     },
     storage: {
@@ -62,7 +64,7 @@ async function worker() {
       messages.listeners[0](message, { id: "extension" }, resolve);
     });
   }
-  return { data, changes, getTab, fetcher, local, send };
+  return { data, changes, getTab, fetcher, local, send, updated };
 }
 afterEach(() => {
   vi.useRealTimers();
@@ -107,33 +109,71 @@ it("a stale 401 clear cannot remove the worker's newly stored session", async ()
 it("reads per-device defaults and clears the account-specific list on account changes", async () => {
   const { data, send } = await worker();
   const { settings } = await import("./storage.ts");
-  expect(await settings()).toMatchObject({ shareMode: "quick", defaultList: "" });
+  expect(await settings()).toMatchObject({ defaultList: "" });
+  expect(await settings()).not.toHaveProperty("shareMode");
   data.defaultList = "private-list";
-  data.shareMode = "ask";
   await send({ type: "setSession", server: "https://keep.example", token: "new" });
   expect(data.defaultList).toBeUndefined();
-  expect(data.shareMode).toBe("ask");
   data.defaultList = "another-list";
   await send({ type: "signOut", token: "new" });
   expect(data.defaultList).toBeUndefined();
 });
-it("runs Ask lookup on user action even with badges disabled", async () => {
-  const { data, fetcher, send } = await worker();
+it("saves and updates the icon with background lookups disabled, then resets on Undo", async () => {
+  const { data, fetcher, send, changes } = await worker();
   data.badge = false;
-  data.shareMode = "ask";
+  changes.listeners[0]({ badge: { oldValue: true, newValue: false } }, "local");
+  await vi.advanceTimersByTimeAsync(0);
   fetcher.mockImplementation(
     async (input) =>
       new Response(
         JSON.stringify(
           typeof input === "string" && input.includes("/api/lists")
             ? { items: [] }
-            : { bookmark: null },
+            : {
+                bookmark: { id: "b", url: "https://example.com", title: "Example", listIds: [] },
+                alreadyExists: false,
+              },
         ),
       ),
   );
   await send({ type: "save", tabId: 1, url: "https://example.com" });
   expect(
-    fetcher.mock.calls.filter(([url]) => typeof url === "string" && url.includes("/lookup?")),
-  ).toHaveLength(1);
-  expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    fetcher.mock.calls.some(([url]) => typeof url === "string" && url.includes("/lookup?")),
+  ).toBe(false);
+  expect(chrome.action.setIcon).toHaveBeenLastCalledWith({
+    tabId: 1,
+    path: { 16: "icons/16.png", 32: "icons/32.png" },
+  });
+  expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ tabId: 1, text: "✓" });
+  await send({ type: "undo", tabId: 1, url: "https://example.com" });
+  expect(chrome.action.setIcon).toHaveBeenLastCalledWith({
+    tabId: 1,
+    path: { 16: "icons/neutral-16.png", 32: "icons/neutral-32.png" },
+  });
+  expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ tabId: 1, text: "" });
+});
+it("resets open tabs to neutral on sign-out", async () => {
+  const { data, changes } = await worker();
+  delete data.token;
+  changes.listeners[0]({ token: { oldValue: "old" } }, "local");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(chrome.action.setIcon).toHaveBeenLastCalledWith({
+    tabId: 1,
+    path: { 16: "icons/neutral-16.png", 32: "icons/neutral-32.png" },
+  });
+  expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ tabId: 1, text: "" });
+});
+
+it("clears the manual saved indicator on navigation without starting a disabled lookup", async () => {
+  const { data, changes, fetcher, updated } = await worker();
+  data.badge = false;
+  changes.listeners[0]({ badge: { oldValue: true, newValue: false } }, "local");
+  await vi.advanceTimersByTimeAsync(0);
+  updated.listeners[0](1, { url: "https://next.example" }, { active: true } as chrome.tabs.Tab);
+  await vi.advanceTimersByTimeAsync(150);
+  expect(chrome.action.setIcon).toHaveBeenLastCalledWith({
+    tabId: 1,
+    path: { 16: "icons/neutral-16.png", 32: "icons/neutral-32.png" },
+  });
+  expect(fetcher).not.toHaveBeenCalled();
 });

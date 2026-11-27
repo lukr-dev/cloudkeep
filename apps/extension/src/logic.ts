@@ -9,7 +9,6 @@ export type Settings = {
   server: string;
   token?: string;
   badge: boolean;
-  shareMode?: "quick" | "ask";
   defaultList?: string;
 };
 export function settingsDefaults(data: Partial<Settings>): Settings {
@@ -17,12 +16,14 @@ export function settingsDefaults(data: Partial<Settings>): Settings {
     server: data.server ?? DEFAULT_SERVER,
     token: data.token,
     badge: data.badge !== false,
-    shareMode: data.shareMode === "ask" ? "ask" : "quick",
     defaultList: data.defaultList ?? "",
   };
 }
-export function defaultListIds(id: string | undefined, lists: List[]): string[] {
-  return id && lists.some((list) => list.id === id) ? [id] : [];
+export function iconPaths(saved: boolean): Record<16 | 32, string> {
+  return {
+    16: `icons/${saved ? "" : "neutral-"}16.png`,
+    32: `icons/${saved ? "" : "neutral-"}32.png`,
+  };
 }
 export function eligible(url: string | undefined): url is string {
   if (!url) return false;
@@ -155,7 +156,7 @@ export class ToggleQueue {
 }
 
 export type SessionState = {
-  status: "checking" | "picking" | "existing" | "saving" | "saved" | "undone" | "failed";
+  status: "saving" | "saved" | "undone" | "failed";
   result?: Saved;
   lists: List[];
   selected: Record<string, boolean>;
@@ -168,7 +169,7 @@ export type SessionState = {
 export class SaveSession {
   state: SessionState = { status: "saving", lists: [], selected: {}, undoing: false };
   readonly queue: ToggleQueue;
-  readonly done: Promise<void>;
+  done: Promise<void>;
   private listeners = new Set<(state: SessionState) => void>();
   private touched = new Set<string>();
   private selection = new Set<string>();
@@ -178,7 +179,7 @@ export class SaveSession {
     private saved: (saved: boolean) => Promise<void>,
     loadLists: () => Promise<List[]>,
     cache: () => Promise<List[]>,
-    config: Pick<Settings, "shareMode" | "defaultList"> = {},
+    config: Pick<Settings, "defaultList"> = {},
   ) {
     this.queue = new ToggleQueue(
       (id, list, selected) =>
@@ -190,7 +191,6 @@ export class SaveSession {
       () => this.publish(),
       (error) => this.fail(error),
     );
-    this.state.status = config.shareMode === "ask" ? "checking" : "saving";
     let fresh = false;
     void cache()
       .then((lists) => {
@@ -200,18 +200,17 @@ export class SaveSession {
         }
       })
       .catch(() => {});
-    const loaded = loadLists()
+    void loadLists()
       .then((lists) => {
         fresh = true;
         this.state.lists = lists;
         this.publish();
-        return lists;
       })
       .catch((error) => {
         this.fail(error);
-        return [];
       });
-    this.done = this.initialize(config, loaded);
+    this.selection = new Set(config.defaultList ? [config.defaultList] : []);
+    this.done = this.save([...this.selection]);
   }
   subscribe(listener: (state: SessionState) => void) {
     this.listeners.add(listener);
@@ -228,12 +227,7 @@ export class SaveSession {
           ...this.state.lists.map((list) => list.id),
           ...(this.state.result?.bookmark.listIds ?? []),
         ]),
-      ].map((id) => [
-        id,
-        this.state.status === "picking" || this.state.status === "checking"
-          ? this.selection.has(id)
-          : this.queue.selected(id),
-      ]),
+      ].map((id) => [id, this.queue.selected(id)]),
     );
     for (const listener of this.listeners) listener(this.state);
   }
@@ -242,49 +236,12 @@ export class SaveSession {
     this.state.unauthorized ||= error instanceof ApiError && error.status === 401;
     this.publish();
   }
-  private async initialize(
-    config: Pick<Settings, "shareMode" | "defaultList">,
-    loaded: Promise<List[]>,
-  ) {
-    if (config.shareMode !== "ask") {
-      // Save immediately; the server rejects a deleted default list with 404, then retry without it.
-      const listIds = config.defaultList ? [config.defaultList] : [];
-      this.selection = new Set(listIds);
-      await this.save(listIds, true);
-      return;
-    }
-    const defaults = config.defaultList
-      ? loaded.then((lists) => defaultListIds(config.defaultList, lists))
-      : Promise.resolve([]);
-    try {
-      const { bookmark } = await this.api<{ bookmark: Saved["bookmark"] | null }>(
-        `/api/bookmarks/lookup?url=${encodeURIComponent(this.url)}`,
-      );
-      if (bookmark) {
-        this.state.result = { bookmark, alreadyExists: true };
-        this.state.status = "existing";
-        this.queue.attach(bookmark.id, bookmark.listIds);
-        await this.saved(true).catch(() => {});
-        return;
-      }
-    } catch (error) {
-      this.fail(error);
-      if (this.state.unauthorized) {
-        this.state.status = "failed";
-        this.publish();
-        return;
-      }
-    }
-    this.selection = new Set(await defaults);
-    this.state.status = "picking";
-    this.publish();
-  }
-  private async save(listIds: string[], quick = false) {
+  private async save(listIds: string[]) {
     if (!this.state.result) this.queue.prepare(listIds);
     this.state.status = "saving";
     this.publish();
     try {
-      if (quick && listIds.length) {
+      if (listIds.length) {
         try {
           await this.saveRequest(listIds);
         } catch (error) {
@@ -292,8 +249,7 @@ export class SaveSession {
           this.selection.clear();
           if (!this.state.result) this.queue.prepare([]);
           await this.saveRequest([]);
-          this.state.error =
-            "Your Quick save list was deleted, so the page was saved without a list.";
+          this.state.error = "Your default list was deleted, so the page was saved without a list.";
           this.publish();
         }
         return;
@@ -305,12 +261,7 @@ export class SaveSession {
         else this.selection.delete(id);
       }
       if (!this.state.result) this.queue.clearPending();
-      this.state.status =
-        error instanceof ApiError && error.status === 401
-          ? "failed"
-          : this.state.result
-            ? "existing"
-            : "picking";
+      this.state.status = "failed";
       this.fail(error);
     }
   }
@@ -322,36 +273,14 @@ export class SaveSession {
     await this.saved(true).catch(() => {});
   }
   async submit() {
-    if (this.state.status !== "picking" && this.state.status !== "existing") return;
-    if (this.state.status === "picking" && this.selection.size > 30) {
-      this.fail(new Error("Choose up to 30 lists."));
-      return;
-    }
-    const existing = this.state.status === "existing";
-    const selected = [...this.selection];
-    if (!existing) this.queue.prepare(selected);
+    if (this.state.status !== "failed" || this.state.unauthorized) return;
     this.state.error = undefined;
-    // Lock the button before waiting for outstanding membership writes.
-    this.state.status = "saving";
-    this.publish();
-    if (existing) await this.queue.idle();
-    await this.save(existing ? [] : selected);
+    this.done = this.save([...this.selection]);
+    await this.done;
   }
   async toggle(list: string) {
     if (this.state.undoing || this.state.status === "undone" || this.state.status === "failed")
       return;
-    if (this.state.status === "checking") return;
-    if (this.state.status === "picking") {
-      if (this.selection.has(list)) this.selection.delete(list);
-      else if (this.selection.size < 30) this.selection.add(list);
-      else {
-        this.fail(new Error("Choose up to 30 lists."));
-        return;
-      }
-      this.touched.add(list);
-      this.publish();
-      return;
-    }
     this.touched.add(list);
     this.queue.toggle(list);
     await this.done;

@@ -5,12 +5,14 @@ const status = document.querySelector<HTMLElement>("#status")!;
 const error = document.querySelector<HTMLElement>("#error")!;
 const filter = document.querySelector<HTMLInputElement>("#filter")!;
 const container = document.querySelector<HTMLElement>("#lists")!;
+const section = document.querySelector<HTMLElement>("#list-section")!;
 const save = document.querySelector<HTMLButtonElement>("#save")!;
 const undo = document.querySelector<HTMLButtonElement>("#undo")!;
-const signIn = document.querySelector<HTMLButtonElement>("#settings")!;
 let lists: List[] = [];
 let state: SessionState = { status: "saving", lists: [], selected: {}, undoing: false };
 let page: { tabId: number; url: string };
+let unauthorized = false;
+let connected = false;
 function intent(type: "submit" | "toggle" | "undo", listId?: string) {
   void chrome.runtime
     .sendMessage({ type, ...page, listId })
@@ -21,44 +23,58 @@ function intent(type: "submit" | "toggle" | "undo", listId?: string) {
 }
 let visible: List[] = [];
 function signedOut() {
+  unauthorized = true;
   status.textContent = "Sign in to save pages";
-  signIn.hidden = false;
-  filter.hidden = true;
-  container.hidden = true;
+  status.dataset.state = "";
+  section.hidden = true;
   undo.hidden = true;
-  save.hidden = true;
+  save.textContent = "Sign in";
+  save.disabled = false;
 }
 function fail(reason: unknown) {
   error.textContent = reason instanceof Error ? reason.message : "Something went wrong. Try again.";
 }
 function render() {
+  filter.hidden = lists.length <= 8;
+  if (filter.hidden) filter.value = "";
   visible = lists.filter((list) => list.name.toLowerCase().includes(filter.value.toLowerCase()));
   container.replaceChildren(
     ...visible.map((list, index) => {
       const button = document.createElement("button");
-      button.textContent = `${!filter.value && index < 9 ? `${index + 1} · ` : ""}${list.name}`;
+      button.className = "chip";
+      button.textContent = `${state.selected[list.id] ? "✓ " : ""}${!filter.value && index < 9 ? `${index + 1} · ` : ""}${list.name}`;
       button.setAttribute("aria-pressed", String(Boolean(state.selected[list.id])));
       button.onclick = () => intent("toggle", list.id);
       return button;
     }),
   );
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = lists.length ? "No matching lists" : "No lists yet";
+    container.append(empty);
+  }
 }
 filter.oninput = render;
-signIn.onclick = () => void chrome.runtime.openOptionsPage();
+save.onclick = () => {
+  if (unauthorized) void chrome.runtime.openOptionsPage();
+  else if (state.status === "failed") {
+    if (connected) intent("submit");
+    else void start().catch(startFailed);
+  } else window.close();
+};
+undo.onclick = () => intent("undo");
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") window.close();
   if (
-    !save.hidden &&
-    !save.disabled &&
-    event.key === "Enter" &&
-    (event.ctrlKey || event.metaKey || (event.target === filter && !filter.value)) &&
-    !event.isComposing
-  ) {
-    event.preventDefault();
-    intent("submit");
+    section.hidden ||
+    container.inert ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.isComposing
+  )
     return;
-  }
-  if (undo.disabled || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
   const index =
     event.key === "Enter" && event.target === filter
       ? 0
@@ -68,10 +84,14 @@ document.addEventListener("keydown", (event) => {
   if (index >= 0 && visible[index]) {
     event.preventDefault();
     intent("toggle", visible[index].id);
+  } else if (!filter.hidden && event.target !== filter && event.key.length === 1) {
+    event.preventDefault();
+    filter.focus();
+    filter.value += event.key;
+    render();
   }
 });
 async function start() {
-  filter.focus();
   const [config, tabs] = await Promise.all([
     settings(),
     chrome.tabs.query({ active: true, currentWindow: true }),
@@ -80,11 +100,12 @@ async function start() {
   document.querySelector<HTMLAnchorElement>("#open")!.href = config.server;
   if (!eligible(tab?.url)) {
     status.textContent = "This page can't be saved";
-    filter.hidden = true;
+    section.hidden = true;
     return;
   }
   document.querySelector<HTMLElement>("#page")!.textContent =
-    `${tab.title || new URL(tab.url).hostname} · ${new URL(tab.url).hostname}`;
+    tab.title || new URL(tab.url).hostname;
+  document.querySelector<HTMLElement>("#domain")!.textContent = new URL(tab.url).hostname;
   if (!config.token) {
     signedOut();
     return;
@@ -100,34 +121,34 @@ async function start() {
     state = next;
     lists = state.lists;
     status.textContent = {
-      checking: "Checking…",
-      picking: "Save to CloudKeep",
-      existing: "Already saved",
-      saving: "Saving…",
-      saved: state.result?.alreadyExists ? "Already saved · moved to top" : "Saved",
+      saving: "◌ Saving…",
+      saved: state.result?.alreadyExists
+        ? "✓ Already saved · moved to top"
+        : "✓ Saved to CloudKeep",
       undone: "Removed",
-      failed: "Couldn't save",
+      failed: "! Couldn't save",
     }[state.status];
+    status.dataset.state = state.status;
     error.textContent = state.error ?? "";
-    save.hidden = state.status !== "picking" && state.status !== "existing";
-    save.textContent = state.status === "existing" ? "Move to top" : "Save";
-    save.disabled = state.undoing;
+    save.textContent = state.status === "failed" ? "Retry" : "Done";
     undo.hidden = state.status !== "saved" || Boolean(state.result?.alreadyExists);
     undo.disabled = state.undoing;
-    filter.disabled =
-      state.undoing ||
-      state.status === "failed" ||
-      state.status === "undone" ||
-      state.status === "checking";
+    filter.disabled = state.undoing || state.status === "failed" || state.status === "undone";
     container.inert = filter.disabled;
     render();
     if (state.status === "undone") window.close();
   });
   port.postMessage({ type: "watch", ...page });
-  save.onclick = () => intent("submit");
-  undo.onclick = () => intent("undo");
+  connected = true;
 }
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.token && !changes.token.newValue) signedOut();
 });
-void start().catch(fail);
+function startFailed(reason: unknown) {
+  state.status = "failed";
+  status.textContent = "! Couldn't save";
+  status.dataset.state = "failed";
+  save.textContent = "Retry";
+  fail(reason);
+}
+void start().catch(startFailed);
