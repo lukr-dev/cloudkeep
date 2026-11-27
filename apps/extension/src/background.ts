@@ -1,5 +1,6 @@
 import {
   cachedBadge,
+  iconPaths,
   cachedLists,
   client,
   eligible,
@@ -26,6 +27,7 @@ let enabled = false;
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 const revisions = new Map<number, number>();
 async function badge(tabId: number, saved: boolean) {
+  await chrome.action.setIcon({ tabId, path: iconPaths(saved) });
   await chrome.action.setBadgeBackgroundColor({ tabId, color: "#1f7a5a" });
   await chrome.action.setBadgeText({ tabId, text: saved ? "✓" : "" });
 }
@@ -95,7 +97,11 @@ function activated(info: chrome.tabs.OnActivatedInfo) {
   void ready.then(() => enabled && schedule(info.tabId));
 }
 function updated(tabId: number, info: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) {
-  if (info.url && tab.active) void ready.then(() => enabled && schedule(tabId));
+  if (!info.url) return;
+  revisions.set(tabId, (revisions.get(tabId) ?? 0) + 1);
+  clearTimeout(timers.get(tabId));
+  void badge(tabId, false).catch(() => {});
+  if (tab.active) void ready.then(() => enabled && schedule(tabId));
 }
 function removed(tabId: number) {
   clearTimeout(timers.get(tabId));
@@ -132,7 +138,7 @@ chrome.tabs.onActivated.addListener(activated);
 chrome.tabs.onUpdated.addListener(updated);
 chrome.tabs.onRemoved.addListener(removed);
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes.shareMode || changes.defaultList)) sessions.clear();
+  if (area === "local" && changes.defaultList) sessions.clear();
   if (area === "local" && (changes.badge || changes.token || changes.server)) {
     guard.invalidate();
     if (changes.token || changes.server) sessions.clear();
@@ -148,7 +154,7 @@ const ports = new Map<
 async function session(tabId: number, url: string, opening = false) {
   const key = JSON.stringify([tabId, url]);
   let pending = sessions.get(key);
-  if (opening && pending && (await settings()).shareMode === "ask") {
+  if (opening && pending) {
     const previous = await pending;
     await previous.done;
     await previous.queue.idle();
@@ -170,8 +176,7 @@ async function session(tabId: number, url: string, opening = false) {
           clearTimeout(timers.get(tabId));
           await remember(url, saved);
           const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-          if (tab?.url === url && latest.badge && enabled && epoch === generation)
-            await badge(tabId, saved);
+          if (tab?.url === url && epoch === generation) await badge(tabId, saved);
         },
         async () => {
           const items = await fetchLists(api);

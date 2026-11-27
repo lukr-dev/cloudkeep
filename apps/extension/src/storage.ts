@@ -4,7 +4,6 @@ export async function settings(): Promise<Settings> {
     "server",
     "token",
     "badge",
-    "shareMode",
     "defaultList",
   ]);
   return settingsDefaults(data);

@@ -21,10 +21,10 @@ export default defineConfig({
                 default_popup: "popup.html",
                 default_title: "Save to CloudKeep",
                 default_icon: Object.fromEntries(
-                  [16, 32].map((size) => [size, `icons/${size}.png`]),
+                  [16, 32].map((size) => [size, `icons/neutral-${size}.png`]),
                 ),
               },
-              options_page: "options.html",
+              options_ui: { page: "options.html", open_in_tab: true },
               background: { service_worker: "background.js", type: "module" },
               commands: {
                 _execute_action: {

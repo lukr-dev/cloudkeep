@@ -4,37 +4,31 @@ Run `vp install`, then `vp run extension#build` from the repository root.
 In `chrome://extensions`, enable Developer mode and **Load unpacked**, selecting
 `apps/extension/dist`. Rebuild and reload the extension after changes.
 
-Open the extension's options, enter your server URL (defaults to
-https://cloudkeep.toastnet.work), email and password, and grant access to that
-server. Only the session token is retained; cookies and passwords are not stored.
+Open the full-tab settings page to sign in with your server URL (defaults to
+https://cloudkeep.toastnet.work), email and password, and grant server access.
+Only the session token is retained; cookies and passwords are not stored.
 
-Click the toolbar icon or press **Alt+Shift+K** to open the popup.
-Change the shortcut in `chrome://extensions/shortcuts` if Chrome reserves it.
-Options has two per-device share modes:
+Click the toolbar icon or press **Alt+Shift+K** to save immediately. Change the
+shortcut in `chrome://extensions/shortcuts` if needed. In settings, choose a
+**Default list** for new saves. If it was deleted, the page is saved without a
+list and a warning appears. Failed saves show **Retry**; expired sessions show
+**Sign in**. Duplicates show “Already saved · moved to top”.
 
-- **Quick save** (default) saves immediately, optionally into a **Quick save list**.
-  If that list was deleted, the page is saved without it; options shows a warning so you can replace it
-  or choose “No list”. Save errors open the picker for retry.
-- **Ask** checks whether the page is saved first, even with badges disabled.
-  New pages show a list picker (up to 30 lists, valid default pre-selected) and
-  **Save**. Closing without saving writes nothing. Existing pages show their
-  lists and **Move to top**; list changes apply immediately.
+The popup's **Lists** chips apply changes immediately. Selected chips show a
+check. With more than eight lists, type to filter; Enter toggles the first match.
+With an empty filter, 1–9 toggle visible chips. **Done** or Escape closes the
+popup. **Undo** removes a new save; **Open CloudKeep ↗** opens the web app.
+Saving, list changes, and Undo continue in the background after the popup closes.
+Reopening starts another save once previous work finishes.
 
-Saved duplicates show “Already saved · moved to top”. New saves have **Undo**.
-Type to filter list chips; Enter toggles the first match, and 1–9 toggle visible
-chips with an empty filter. In the new-page picker, Enter with an empty filter
-or Ctrl/Cmd+Enter saves. Escape closes. “Open CloudKeep” opens the full web app.
+The page indicator is on by default: saved pages have a green toolbar icon and
+✓ badge; unknown or unsaved pages use a neutral bookmark. Turn off the indicator
+in settings to stop background page lookups. Popup saves still detect duplicates
+and update the icon and badge; Undo resets them. Lookups are debounced, cached
+for one minute, and aborted when disabled. Signing out resets open tabs and
+clears the list cache and account-specific default list.
 
-Saving, list changes, and Undo run in the background worker and continue when the
-popup closes. Quick save reuses the same tab's worker session; Ask checks again
-when reopened. Worker sessions last until the worker restarts, the tab closes,
-or the account changes.
-
-The duplicate badge is on by default. Options can disable background page lookups;
-Ask still checks on opening. Background lookups are debounced and cached for one
-minute. Signing out or changing accounts clears the list cache and default list,
-while the share mode stays on the device. Disabling badges aborts pending
-background lookups.
-
-Validation: `vp check`, `vp test`, `vp run extension#typecheck`.
-A tag `extension-v<version>` publishes a zip; its version must match package.json.
+Regenerate the committed toolbar PNGs with `node apps/extension/scripts/icons.mjs`.
+Validation: `vp check`, `vp test`, `vp run extension#typecheck`,
+`vp run extension#build`. A tag `extension-v<version>` publishes a zip; its
+version must match package.json.
